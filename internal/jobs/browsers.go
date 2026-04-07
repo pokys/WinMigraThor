@@ -119,6 +119,22 @@ func (j *BrowsersJob) Backup(userPath, target string, opts Options) (Result, err
 	result := Result{JobName: j.Name()}
 
 	browsers := detectBrowsers(userPath)
+
+	// Filter browsers by selection if specified
+	if len(opts.SelectedBrowsers) > 0 {
+		selected := make(map[string]bool)
+		for _, name := range opts.SelectedBrowsers {
+			selected[name] = true
+		}
+		var filtered []Browser
+		for _, b := range browsers {
+			if selected[b.Name] {
+				filtered = append(filtered, b)
+			}
+		}
+		browsers = filtered
+	}
+
 	if len(browsers) == 0 {
 		result.Status = "skipped"
 		return result, nil

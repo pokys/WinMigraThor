@@ -24,7 +24,7 @@ func main() {
 
 	switch args[0] {
 	case "version", "--version", "-v":
-		fmt.Printf("migrator v%s (built %s)\n", version, buildDate)
+		fmt.Printf("MigraThor v%s (built %s)\n", version, buildDate)
 
 	case "help", "--help", "-h":
 		printUsage()
@@ -157,19 +157,23 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m appModel) navigate(screen ui.Screen) (tea.Model, tea.Cmd) {
 	m.screen = screen
+	// Re-send the current window size so the new screen renders at full width
+	sizeCmd := func() tea.Msg {
+		return tea.WindowSizeMsg{Width: m.width, Height: m.height}
+	}
 	switch screen {
 	case ui.ScreenMainMenu:
 		m.mainMenu = ui.NewMainMenu()
-		return m, m.mainMenu.Init()
+		return m, tea.Batch(m.mainMenu.Init(), sizeCmd)
 	case ui.ScreenBackupWizard:
 		m.backupWiz = ui.NewBackupWizard(m.dryRun)
-		return m, m.backupWiz.Init()
+		return m, tea.Batch(m.backupWiz.Init(), sizeCmd)
 	case ui.ScreenRestoreWizard:
 		m.restoreWiz = ui.NewRestoreWizard()
-		return m, m.restoreWiz.Init()
+		return m, tea.Batch(m.restoreWiz.Init(), sizeCmd)
 	case ui.ScreenCleanup:
 		m.cleanupSc = ui.NewCleanupScreen()
-		return m, m.cleanupSc.Init()
+		return m, tea.Batch(m.cleanupSc.Init(), sizeCmd)
 	}
 	return m, nil
 }
@@ -203,16 +207,16 @@ func runTUI(startScreen ui.Screen, dryRun bool) {
 }
 
 func printUsage() {
-	fmt.Print(`migrator - Windows Migration Tool
+	fmt.Print(`MigraThor - Windows Migration Tool
 
 Usage:
-  migrator.exe                     Launch interactive menu
-  migrator.exe backup              Launch backup wizard
-  migrator.exe backup --dry-run    Show backup plan without executing
-  migrator.exe restore             Launch restore wizard
-  migrator.exe cleanup             Remove temporary files
-  migrator.exe version             Print version information
-  migrator.exe help                Show this help
+  migrathor.exe                     Launch interactive menu
+  migrathor.exe backup              Launch backup wizard
+  migrathor.exe backup --dry-run    Show backup plan without executing
+  migrathor.exe restore             Launch restore wizard
+  migrathor.exe cleanup             Remove temporary files
+  migrathor.exe version             Print version information
+  migrathor.exe help                Show this help
 
 Keybindings (in TUI):
   ↑/↓ or j/k   Navigate

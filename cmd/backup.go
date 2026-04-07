@@ -19,6 +19,7 @@ type BackupOptions struct {
 	Users            []string // user paths to back up
 	JobNames         []string // e.g. ["userdata","browsers","wifi"]
 	SelectedFolders  []string // subset of standard folders for userdata job (nil = all)
+	SelectedBrowsers []string // subset of browsers (nil = all)
 	DryRun           bool
 	Compress         bool
 	PasswordMode     string
@@ -70,6 +71,8 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 		Compress:         opts.Compress,
 		LogDir:           logDir,
 		ProgressCh:       progressCh,
+		SelectedFolders:  opts.SelectedFolders,
+		SelectedBrowsers: opts.SelectedBrowsers,
 	}
 
 	for _, userPath := range opts.Users {
@@ -78,6 +81,11 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 
 		for _, j := range activeJobs {
 			log.Info("running job", "job", j.Name(), "user", username)
+
+			// Notify UI that this job is starting
+			if progressCh != nil {
+				progressCh <- jobs.Progress{JobName: j.Name(), Current: 0, Total: 1}
+			}
 
 			result, err := j.Backup(userPath, opts.Target, jobOpts)
 			if err != nil {

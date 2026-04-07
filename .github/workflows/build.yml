@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-and-release:
-    name: Build migrator.exe
+    name: Build migrathor.exe
     runs-on: ubuntu-latest
 
     steps:
@@ -38,9 +38,9 @@ jobs:
           fi
           go build \
             -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${BUILD_DATE}" \
-            -o migrator.exe \
+            -o migrathor.exe \
             .
-          ls -lh migrator.exe
+          ls -lh migrathor.exe
 
       # ── Rolling "latest" release (every push to main) ──────────────────────
       - name: Publish latest release
@@ -53,9 +53,9 @@ jobs:
           git push --delete origin latest 2>/dev/null || true
 
           # Create fresh latest release
-          NOTES="Automaticky sestaveno z main. Commit: ${GITHUB_SHA}. Datum: $(date -u +"%Y-%m-%d %H:%M UTC"). Stahni migrator.exe nize a spust jako spravce."
-          gh release create latest migrator.exe \
-            --title "migrator latest" \
+          NOTES="Automaticky sestaveno z main. Commit: ${GITHUB_SHA}. Datum: $(date -u +"%Y-%m-%d %H:%M UTC"). Stahni migrathor.exe nize a spust jako spravce."
+          gh release create latest migrathor.exe \
+            --title "MigraThor latest" \
             --notes "$NOTES" \
             --prerelease
 
@@ -66,6 +66,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          gh release create "${GITHUB_REF_NAME}" migrator.exe \
-            --title "migrator v${VERSION}" \
+          gh release create "${GITHUB_REF_NAME}" migrathor.exe \
+            --title "MigraThor v${VERSION}" \
             --generate-notes

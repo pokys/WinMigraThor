@@ -115,7 +115,7 @@ func ValidatePath(path string) error {
 		return fmt.Errorf("path exists but is not a directory")
 	}
 	// Test writability
-	testFile := strings.TrimRight(path, `/\`) + "/.migrator_test"
+	testFile := strings.TrimRight(path, `/\`) + "/.migrathor_test"
 	f, err := os.Create(testFile)
 	if err != nil {
 		return fmt.Errorf("directory is not writable: %v", err)

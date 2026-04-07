@@ -8,6 +8,8 @@ type Options struct {
 	Compress         bool
 	LogDir           string
 	ProgressCh       chan<- Progress
+	SelectedFolders  []string // subset of standard folders (nil = all)
+	SelectedBrowsers []string // subset of browsers (nil = all)
 }
 
 // Progress is sent from a running job to the UI.

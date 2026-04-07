@@ -114,9 +114,15 @@ func NewBackupWizard(dryRun bool) BackupWizardModel {
 		{Label: "Music", Selected: true},
 	}
 
+	browserChildren := []SelectItem{
+		{Label: "Chrome", Selected: true},
+		{Label: "Edge", Selected: true},
+		{Label: "Firefox", Selected: true},
+	}
+
 	dataItems := []SelectItem{
 		{Label: "User folders", Detail: "Desktop, Documents, Downloads, ...", Selected: true, Children: folderChildren},
-		{Label: "Browsers", Detail: "Chrome, Edge, Firefox", Selected: true},
+		{Label: "Browsers", Detail: "Chrome, Edge, Firefox", Selected: true, Children: browserChildren},
 		{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
 		{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
 	}
@@ -443,14 +449,14 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 		}
 	}
 
-	// Collect selected job names, respecting folder sub-selection
+	// Collect selected job names, respecting sub-selection for items with children
 	var jobNames []string
 	for _, item := range m.dataSelector.Items {
 		name, ok := jobLabelToName[item.Label]
 		if !ok {
 			continue
 		}
-		if item.Label == "User folders" {
+		if len(item.Children) > 0 {
 			// Include if any children selected (or no children defined = selected itself)
 			anyChild := false
 			for _, c := range item.Children {
@@ -474,6 +480,18 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 			for _, c := range item.Children {
 				if c.Selected {
 					selectedFolders = append(selectedFolders, c.Label)
+				}
+			}
+		}
+	}
+
+	// Collect selected browser names
+	var selectedBrowsers []string
+	for _, item := range m.dataSelector.Items {
+		if item.Label == "Browsers" {
+			for _, c := range item.Children {
+				if c.Selected {
+					selectedBrowsers = append(selectedBrowsers, c.Label)
 				}
 			}
 		}
@@ -504,6 +522,7 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 		Users:            userPaths,
 		JobNames:         jobNames,
 		SelectedFolders:  selectedFolders,
+		SelectedBrowsers: selectedBrowsers,
 		DryRun:           m.dryRun,
 		Compress:         m.compress,
 		PasswordMode:     []string{"skip", "assisted", "experimental"}[m.passwordMode],
