@@ -50,7 +50,7 @@ func NewMainMenu() MainMenuModel {
 			{Label: "Restore", Description: "Restore data from a backup", Action: ScreenRestoreWizard},
 			{Label: "Cleanup", Description: "Remove temporary files", Action: ScreenCleanup},
 			{Label: "Help", Description: "Show usage and keybindings", Action: ScreenHelp},
-			{Label: "Quit", Description: "Exit migrator", Action: -1},
+			{Label: "Quit", Description: "Exit MigraThor", Action: -1},
 		},
 	}
 }
@@ -100,9 +100,9 @@ func (m MainMenuModel) View() string {
 	}
 
 	logo := `
-   ╔╦╗╦╔═╗╦═╗╔═╗╔╦╗╔═╗╦═╗
-   ║║║║║ ╦╠╦╝╠═╣ ║ ║ ║╠╦╝
-   ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╚═╝╩╚═  v1.0.0`
+   ╔╦╗╦╔═╗╦═╗╔═╗╔╦╗╦ ╦╔═╗╦═╗
+   ║║║║║ ╦╠╦╝╠═╣ ║ ╠═╣║ ║╠╦╝
+   ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╩ ╩╚═╝╩╚═  v1.0.0`
 
 	logoStyled := StyleAccent().Render(logo)
 	subtitle := "\n   Windows Migration Tool\n"

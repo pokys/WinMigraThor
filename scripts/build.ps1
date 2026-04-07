@@ -1,9 +1,9 @@
-# WinMigraThor Build Script
-# Usage: .\scripts\build.ps1 [-Version "1.2.3"] [-Output "migrator.exe"]
+# MigraThor Build Script
+# Usage: .\scripts\build.ps1 [-Version "1.2.3"] [-Output "migrathor.exe"]
 
 param(
     [string]$Version = "1.0.0",
-    [string]$Output = "migrator.exe",
+    [string]$Output = "migrathor.exe",
     [switch]$Clean
 )
 
@@ -12,7 +12,7 @@ $ErrorActionPreference = "Stop"
 $BuildDate = Get-Date -Format "yyyy-MM-dd"
 $LdFlags = "-s -w -X main.version=$Version -X main.buildDate=$BuildDate"
 
-Write-Host "=== WinMigraThor Build ===" -ForegroundColor Cyan
+Write-Host "=== MigraThor Build ===" -ForegroundColor Cyan
 Write-Host "Version:    $Version"
 Write-Host "Build date: $BuildDate"
 Write-Host "Output:     $Output"

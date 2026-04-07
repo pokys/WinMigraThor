@@ -70,7 +70,13 @@ func (j *UserDataJob) Backup(userPath, target string, opts Options) (Result, err
 	var totalBytes int64
 	var totalFiles int
 
-	for _, folder := range StandardFolders {
+	// Determine which folders to back up
+	folders := StandardFolders
+	if len(opts.SelectedFolders) > 0 {
+		folders = opts.SelectedFolders
+	}
+
+	for _, folder := range folders {
 		src := filepath.Join(userPath, folder)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
 			continue
