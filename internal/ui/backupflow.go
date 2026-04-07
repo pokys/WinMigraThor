@@ -35,6 +35,7 @@ var jobLabelToName = map[string]string{
 	"Bookmarks only":      "bookmarks",
 	"Email":               "email",
 	"WiFi profiles":       "wifi",
+	"VPN connections":     "vpn",
 	"Credentials":         "credentials",
 	"Certificates":        "certificates",
 	"Dev environment":     "devenv",
@@ -44,22 +45,12 @@ var jobLabelToName = map[string]string{
 
 // ── Options step: flat cursor over all radio options ─────────────────────────
 // Layout:
-//   [0] Password: Skip
-//   [1] Password: Assisted export
-//   [2] Password: Experimental
-//   [3] Compression: No
-//   [4] Compression: Yes
-//   [5] Scope: Standard folders only
-//   [6] Scope: Include custom folders
+//   [0] Compression: No
+//   [1] Compression: Yes
 const (
-	optPwdSkip    = 0
-	optPwdAssist  = 1
-	optPwdExp     = 2
-	optCompNo     = 3
-	optCompYes    = 4
-	optScopeStd   = 5
-	optScopeCust  = 6
-	optionsCount  = 7
+	optCompNo    = 0
+	optCompYes   = 1
+	optionsCount = 2
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -80,9 +71,7 @@ type BackupWizardModel struct {
 
 	// Step 3: Options
 	optionsCursor int
-	passwordMode  int // 0=skip 1=assisted 2=experimental
 	compress      bool
-	customFolders bool
 
 	// Step 4: Target
 	targetInput textinput.Model
@@ -361,7 +350,6 @@ func buildBackupDataItems(browserChildren []SelectItem, advanced bool) []SelectI
 		{Label: "User folders", Detail: "Desktop, Documents, Downloads, ...", Selected: true, Children: folderChildren},
 		browsersItem,
 		{Label: "Bookmarks only", Detail: "Export bookmarks as HTML files", Selected: false},
-		{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
 		{Label: "Credentials", Detail: "Windows Credential Manager vault", Selected: true},
 		{Label: "Installed apps", Detail: "Export list + winget match", Selected: true},
 	}
@@ -369,6 +357,8 @@ func buildBackupDataItems(browserChildren []SelectItem, advanced bool) []SelectI
 	if advanced {
 		dataItems = append(dataItems,
 			SelectItem{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
+			SelectItem{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
+			SelectItem{Label: "VPN connections", Detail: "RAS phonebook (.pbk) files", Selected: true},
 			SelectItem{Label: "Certificates", Detail: "Personal certificates (valid, with private key)", Selected: true},
 			SelectItem{Label: "Dev environment", Detail: ".ssh, .gitconfig, .docker"},
 			SelectItem{Label: "App configs", Detail: "VS Code settings, AppData"},
@@ -427,20 +417,10 @@ func (m BackupWizardModel) handleOptionsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	case " ", "l", "right":
 		// Select the focused option
 		switch m.optionsCursor {
-		case optPwdSkip:
-			m.passwordMode = 0
-		case optPwdAssist:
-			m.passwordMode = 1
-		case optPwdExp:
-			m.passwordMode = 2
 		case optCompNo:
 			m.compress = false
 		case optCompYes:
 			m.compress = true
-		case optScopeStd:
-			m.customFolders = false
-		case optScopeCust:
-			m.customFolders = true
 		}
 	}
 	return m, nil
@@ -601,7 +581,7 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 		SelectedBrowsers: selectedBrowsers,
 		DryRun:           m.dryRun,
 		Compress:         m.compress,
-		PasswordMode:     []string{"skip", "assisted", "experimental"}[m.passwordMode],
+		PasswordMode:     "skip",
 		ConflictStrategy: "ask",
 	}
 
@@ -679,9 +659,6 @@ func (m BackupWizardModel) buildSummary(target string) string {
 			}
 		}
 	}
-
-	sb.WriteString(fmt.Sprintf("\n  Hesla prohlížeče: %s\n",
-		[]string{"přeskočit", "asistovaný export", "experimentální"}[m.passwordMode]))
 
 	if m.dryRun {
 		sb.WriteString("\n  " + StyleWarning.Render("⚠ DRY-RUN — žádná data nebudou zkopírována"))
@@ -766,13 +743,8 @@ func (m BackupWizardModel) renderOptions() string {
 	}
 
 	options := []optDef{
-		{optPwdSkip, "Hesla prohlížeče:", "Přeskočit", m.passwordMode == 0},
-		{optPwdAssist, "", "Asistovaný export (doporučeno)", m.passwordMode == 1},
-		{optPwdExp, "", "Experimentální auto-export (nebezpečné)", m.passwordMode == 2},
 		{optCompNo, "Komprese:", "Ne — ponechat adresářovou strukturu (rychlejší)", !m.compress},
 		{optCompYes, "", "Ano — vytvořit .zip po záloze", m.compress},
-		{optScopeStd, "Složky uživatele:", "Pouze standardní složky", !m.customFolders},
-		{optScopeCust, "", "Vlastní složky (výběr v dalším kroku)", m.customFolders},
 	}
 
 	var sb strings.Builder
