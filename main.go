@@ -75,7 +75,7 @@ func newAppModel(startScreen ui.Screen, dryRun bool) appModel {
 		dryRun:   dryRun,
 	}
 	if startScreen == ui.ScreenBackupWizard {
-		m.backupWiz = ui.NewBackupWizard(nil, dryRun)
+		m.backupWiz = ui.NewBackupWizard(dryRun)
 	}
 	if startScreen == ui.ScreenRestoreWizard {
 		m.restoreWiz = ui.NewRestoreWizard()
@@ -162,7 +162,7 @@ func (m appModel) navigate(screen ui.Screen) (tea.Model, tea.Cmd) {
 		m.mainMenu = ui.NewMainMenu()
 		return m, m.mainMenu.Init()
 	case ui.ScreenBackupWizard:
-		m.backupWiz = ui.NewBackupWizard(nil, m.dryRun)
+		m.backupWiz = ui.NewBackupWizard(m.dryRun)
 		return m, m.backupWiz.Init()
 	case ui.ScreenRestoreWizard:
 		m.restoreWiz = ui.NewRestoreWizard()

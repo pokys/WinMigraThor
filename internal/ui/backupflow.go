@@ -7,7 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/pokys/winmigrathor/internal/jobs"
-	
+	"github.com/pokys/winmigrathor/internal/users"
 )
 
 // BackupWizardModel is the Bubble Tea model for the full backup wizard.
@@ -46,11 +46,18 @@ type BackupWizardModel struct {
 	logDir  string
 
 	// Shared
-	dryRun     bool
-	DoneFunc   func() // called when done, to return to main menu
+	dryRun      bool
+	DoneFunc    func() // called when done, to return to main menu
+	scanningUsers bool
 }
 
-func NewBackupWizard(userItems []SelectItem, dryRun bool) BackupWizardModel {
+// UsersScannedMsg is received when user detection completes.
+type UsersScannedMsg struct {
+	Profiles []users.Profile
+	Err      error
+}
+
+func NewBackupWizard(dryRun bool) BackupWizardModel {
 	ti := textinput.New()
 	ti.Placeholder = "D:\\migration-backup"
 	ti.Width = 40
@@ -62,23 +69,63 @@ func NewBackupWizard(userItems []SelectItem, dryRun bool) BackupWizardModel {
 		{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
 	}
 
-	m := BackupWizardModel{
-		step:         BackupStepUsers,
-		userSelector: NewSelector("Select user profiles to back up:", userItems),
-		dataSelector: NewSelector("Select data categories to include:", dataItems),
-		targetInput:  ti,
-		dryRun:       dryRun,
+	return BackupWizardModel{
+		step:          BackupStepUsers,
+		userSelector:  NewSelector("Select user profiles to back up:", nil),
+		dataSelector:  NewSelector("Select data categories to include:", dataItems),
+		targetInput:   ti,
+		dryRun:        dryRun,
+		scanningUsers: true,
 	}
-	return m
 }
 
-func (m BackupWizardModel) Init() tea.Cmd { return textinput.Blink }
+func (m BackupWizardModel) Init() tea.Cmd {
+	return tea.Batch(
+		textinput.Blink,
+		func() tea.Msg {
+			profiles, err := users.Detect()
+			return UsersScannedMsg{Profiles: profiles, Err: err}
+		},
+	)
+}
 
 func (m BackupWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+
+	case UsersScannedMsg:
+		m.scanningUsers = false
+		if msg.Err != nil {
+			// Show error but don't block — user can still proceed if they type a path manually
+			m.userSelector.Items = []SelectItem{
+				{Label: "Error detecting users: " + msg.Err.Error(), Disabled: true},
+			}
+			return m, nil
+		}
+		var items []SelectItem
+		for _, p := range msg.Profiles {
+			items = append(items, SelectItem{
+				Label:     p.Username,
+				Detail:    p.Path,
+				SizeBytes: p.SizeBytes,
+				Selected:  p.IsCurrent, // pre-select current user
+			})
+		}
+		// If nothing was pre-selected (e.g. domain user not matched), select first
+		anySelected := false
+		for _, it := range items {
+			if it.Selected {
+				anySelected = true
+				break
+			}
+		}
+		if !anySelected && len(items) > 0 {
+			items[0].Selected = true
+		}
+		m.userSelector.Items = items
 		return m, nil
 
 	case tea.KeyMsg:
@@ -265,8 +312,13 @@ func (m BackupWizardModel) View() string {
 
 	switch m.step {
 	case BackupStepUsers:
-		body = "\n  Select user profiles to back up:\n\n" + m.userSelector.View()
-		footer = "Space toggle  a all  n none  Enter next  Esc back"
+		if m.scanningUsers {
+			body = "\n  " + StyleMuted.Render("Scanning user profiles...") + "\n"
+			footer = "Please wait..."
+		} else {
+			body = "\n  Select user profiles to back up:\n\n" + m.userSelector.View()
+			footer = "Space toggle  a all  n none  Enter next  Esc back"
+		}
 
 	case BackupStepData:
 		modeLabel := "[SIMPLE]"
