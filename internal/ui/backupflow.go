@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -111,35 +112,10 @@ func NewBackupWizard(dryRun bool) BackupWizardModel {
 	ti.Placeholder = `D:\migration-backup`
 	ti.Width = 40
 
-	// Standard data items with folder sub-items
-	folderChildren := []SelectItem{
-		{Label: "Desktop", Selected: true},
-		{Label: "Documents", Selected: true},
-		{Label: "Downloads", Selected: true},
-		{Label: "Pictures", Selected: true},
-		{Label: "Videos", Selected: true},
-		{Label: "Music", Selected: true},
-	}
-
-	browserChildren := []SelectItem{
-		{Label: "Chrome", Selected: true},
-		{Label: "Edge", Selected: true},
-		{Label: "Firefox", Selected: true},
-	}
-
-	dataItems := []SelectItem{
-		{Label: "User folders", Detail: "Desktop, Documents, Downloads, ...", Selected: true, Children: folderChildren},
-		{Label: "Browsers", Detail: "Full profiles (Chrome, Edge, Firefox)", Selected: true, Children: browserChildren},
-		{Label: "Bookmarks only", Detail: "Export bookmarks as HTML files", Selected: false},
-		{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
-		{Label: "Credentials", Detail: "Windows Credential Manager vault", Selected: true},
-		{Label: "Installed apps", Detail: "Export list + winget match", Selected: true},
-	}
-
 	return BackupWizardModel{
 		step:          BackupStepUsers,
 		userSelector:  NewSelector("Select user profiles to back up:", nil),
-		dataSelector:  NewSelector("Select data categories to include:", dataItems),
+		dataSelector:  NewSelector("Select data categories to include:", buildBackupDataItems(nil, false)),
 		targetInput:   ti,
 		dryRun:        dryRun,
 		scanningUsers: true,
@@ -307,6 +283,7 @@ func (m BackupWizardModel) handleUsersStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 	switch msg.String() {
 	case "enter":
 		if m.userSelector.AnySelected() {
+			m.refreshDataSelector()
 			m.step = BackupStepData
 		}
 	case "esc":
@@ -329,24 +306,107 @@ func (m BackupWizardModel) handleDataStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.step = BackupStepUsers
 	case "tab":
 		m.advancedMode = !m.advancedMode
-		if m.advancedMode && len(m.dataSelector.Items) <= 6 {
-			m.dataSelector.Items = append(m.dataSelector.Items,
-				SelectItem{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
-				SelectItem{Label: "Certificates", Detail: "Personal certificates (valid, with private key)", Selected: true},
-				SelectItem{Label: "Dev environment", Detail: ".ssh, .gitconfig, .docker"},
-				SelectItem{Label: "App configs", Detail: "VS Code settings, AppData"},
-			)
-			m.dataSelector.rebuildFlat()
-		} else if !m.advancedMode && len(m.dataSelector.Items) > 6 {
-			m.dataSelector.Items = m.dataSelector.Items[:6]
-			m.dataSelector.rebuildFlat()
-		}
+		m.refreshDataSelector()
 	default:
 		var cmd tea.Cmd
 		m.dataSelector, cmd = m.dataSelector.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+func (m *BackupWizardModel) refreshDataSelector() {
+	browserChildren := detectedBackupBrowserChildren(m.selectedBackupUserPaths())
+	m.dataSelector = NewSelector("Select data categories to include:", buildBackupDataItems(browserChildren, m.advancedMode))
+}
+
+func (m BackupWizardModel) selectedBackupUserPaths() []string {
+	var userPaths []string
+	for _, item := range m.userSelector.Items {
+		if item.Selected {
+			path := item.Detail
+			if path == "" {
+				path = filepath.Join(`C:\Users`, item.Label)
+			}
+			userPaths = append(userPaths, path)
+		}
+	}
+	return userPaths
+}
+
+func buildBackupDataItems(browserChildren []SelectItem, advanced bool) []SelectItem {
+	folderChildren := []SelectItem{
+		{Label: "Desktop", Selected: true},
+		{Label: "Documents", Selected: true},
+		{Label: "Downloads", Selected: true},
+		{Label: "Pictures", Selected: true},
+		{Label: "Videos", Selected: true},
+		{Label: "Music", Selected: true},
+	}
+
+	browsersItem := SelectItem{
+		Label:    "Browsers",
+		Detail:   "No supported browsers detected for selected users",
+		Selected: false,
+		Disabled: true,
+	}
+	if len(browserChildren) > 0 {
+		browsersItem.Detail = "Full profiles of detected browsers"
+		browsersItem.Selected = true
+		browsersItem.Disabled = false
+		browsersItem.Children = browserChildren
+	}
+
+	dataItems := []SelectItem{
+		{Label: "User folders", Detail: "Desktop, Documents, Downloads, ...", Selected: true, Children: folderChildren},
+		browsersItem,
+		{Label: "Bookmarks only", Detail: "Export bookmarks as HTML files", Selected: false},
+		{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
+		{Label: "Credentials", Detail: "Windows Credential Manager vault", Selected: true},
+		{Label: "Installed apps", Detail: "Export list + winget match", Selected: true},
+	}
+
+	if advanced {
+		dataItems = append(dataItems,
+			SelectItem{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
+			SelectItem{Label: "Certificates", Detail: "Personal certificates (valid, with private key)", Selected: true},
+			SelectItem{Label: "Dev environment", Detail: ".ssh, .gitconfig, .docker"},
+			SelectItem{Label: "App configs", Detail: "VS Code settings, AppData"},
+		)
+	}
+
+	return dataItems
+}
+
+func detectedBackupBrowserChildren(userPaths []string) []SelectItem {
+	seen := make(map[string]bool)
+	for _, userPath := range userPaths {
+		for _, name := range jobs.DetectedBrowserNames(userPath) {
+			seen[name] = true
+		}
+	}
+
+	order := []string{"Chrome", "Edge", "Firefox"}
+	children := make([]SelectItem, 0, len(order))
+	for _, name := range order {
+		if seen[name] {
+			children = append(children, SelectItem{Label: name, Selected: true})
+			delete(seen, name)
+		}
+	}
+
+	if len(seen) > 0 {
+		var extra []string
+		for name := range seen {
+			extra = append(extra, name)
+		}
+		sort.Strings(extra)
+		for _, name := range extra {
+			children = append(children, SelectItem{Label: name, Selected: true})
+		}
+	}
+
+	return children
 }
 
 func (m BackupWizardModel) handleOptionsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
