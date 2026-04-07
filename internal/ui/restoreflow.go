@@ -458,6 +458,8 @@ func (m RestoreWizardModel) handleDataStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 }
 
 func (m *RestoreWizardModel) buildUserMappings() {
+	m.userMappings = nil
+	m.mappingCursor = 0
 	for _, u := range m.sourceMeta.Users {
 		ti := textinput.New()
 		ti.SetValue(u)
@@ -575,7 +577,7 @@ func (m *RestoreWizardModel) startRestore() tea.Cmd {
 	for _, um := range m.userMappings {
 		target := strings.TrimSpace(um.targetUser.Value())
 		if target != "" {
-			userMapping[um.sourceUser] = filepath.Join(`C:\Users`, target)
+			userMapping[um.sourceUser] = resolveTargetUserPath(target)
 		}
 	}
 
@@ -1255,4 +1257,21 @@ func resolveScriptOutputDir(fallback string) string {
 		return home
 	}
 	return fallback
+}
+
+func resolveTargetUserPath(target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+
+	if strings.Contains(target, `:\`) || strings.HasPrefix(target, `\\`) {
+		return filepath.Clean(target)
+	}
+
+	if len(target) == 2 && strings.HasSuffix(target, ":") {
+		return filepath.Join(target+`\`, "Users")
+	}
+
+	return filepath.Join(`C:\Users`, target)
 }
