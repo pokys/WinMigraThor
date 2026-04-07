@@ -21,6 +21,11 @@ jobs:
     name: Build migrator.exe
     runs-on: ubuntu-latest
 
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_tag: ${{ steps.version.outputs.is_tag }}
+      is_main: ${{ steps.version.outputs.is_main }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,15 +39,25 @@ jobs:
       - name: Determine version
         id: version
         run: |
+          IS_TAG=false
+          IS_MAIN=false
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
+            IS_TAG=true
           else
             VERSION="0.0.0-${GITHUB_SHA::8}"
+            if [[ "${{ github.ref }}" == "refs/heads/main" || "${{ github.ref }}" == "refs/heads/master" ]]; then
+              IS_MAIN=true
+            fi
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Version: $VERSION"
+
+          echo "version=$VERSION"     >> "$GITHUB_OUTPUT"
+          echo "is_tag=$IS_TAG"       >> "$GITHUB_OUTPUT"
+          echo "is_main=$IS_MAIN"     >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION  is_tag=$IS_TAG  is_main=$IS_MAIN"
 
       - name: Download dependencies
         run: go mod download
@@ -72,11 +87,12 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-  release:
-    name: Create GitHub Release
+  # ─── Versioned release (on tag v*) ────────────────────────────────────────
+  release-tag:
+    name: Release (versioned)
     runs-on: ubuntu-latest
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.build.outputs.is_tag == 'true'
 
     steps:
       - name: Download artifact
@@ -84,10 +100,48 @@ jobs:
         with:
           name: migrator-windows-amd64
 
-      - name: Create release
+      - name: Create versioned release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: "migrator v${{ needs.build.outputs.version }}"
           files: migrator.exe
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # ─── Rolling "latest" release (on push to main/master) ────────────────────
+  release-latest:
+    name: Release (latest)
+    runs-on: ubuntu-latest
+    needs: build
+    if: needs.build.outputs.is_main == 'true'
+
+    steps:
+      - name: Checkout (for tag push)
+        uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: migrator-windows-amd64
+
+      - name: Delete existing "latest" tag (if present)
+        run: |
+          git push --delete origin latest 2>/dev/null || true
+
+      - name: Create / update rolling "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "migrator latest (dev build)"
+          body: |
+            Automatically built from the latest commit on `main`.
+
+            **Commit:** `${{ github.sha }}`
+            **Date:** ${{ github.event.head_commit.timestamp }}
+
+            > This is a development build. For stable releases, see the [Releases page](../../releases) for tagged versions.
+          files: migrator.exe
+          draft: false
+          prerelease: true
