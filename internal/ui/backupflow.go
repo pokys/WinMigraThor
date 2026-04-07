@@ -27,13 +27,16 @@ type backupDoneMsg struct{ result *cmd.BackupResult }
 // ── Job label → internal name mapping ─────────────────────────────────────────
 
 var jobLabelToName = map[string]string{
-	"User folders":    "userdata",
-	"Browsers":        "browsers",
-	"Email":           "email",
-	"WiFi profiles":   "wifi",
-	"Dev environment": "devenv",
-	"App configs":     "appconfig",
-	"Installed apps":  "apps",
+	"User folders":        "userdata",
+	"Browsers":            "browsers",
+	"Bookmarks only":      "bookmarks",
+	"Email":               "email",
+	"WiFi profiles":       "wifi",
+	"Credentials":         "credentials",
+	"Certificates":        "certificates",
+	"Dev environment":     "devenv",
+	"App configs":         "appconfig",
+	"Installed apps":      "apps",
 }
 
 // ── Options step: flat cursor over all radio options ─────────────────────────
@@ -86,12 +89,13 @@ type BackupWizardModel struct {
 	summaryContent string
 
 	// Step 6: Running
-	jobRows       []JobProgressRow
-	overallPct    float64
-	warnings      []string
-	cancelConfirm bool
-	progressCh    chan jobs.Progress
-	startTime     time.Time
+	jobRows        []JobProgressRow
+	overallPct     float64
+	warnings       []string
+	cancelConfirm  bool
+	progressCh     chan jobs.Progress
+	backupResultCh chan *cmd.BackupResult
+	startTime      time.Time
 
 	// Step 7: Done
 	results []jobs.Result
@@ -122,9 +126,13 @@ func NewBackupWizard(dryRun bool) BackupWizardModel {
 
 	dataItems := []SelectItem{
 		{Label: "User folders", Detail: "Desktop, Documents, Downloads, ...", Selected: true, Children: folderChildren},
-		{Label: "Browsers", Detail: "Chrome, Edge, Firefox", Selected: true, Children: browserChildren},
+		{Label: "Browsers", Detail: "Full profiles (Chrome, Edge, Firefox)", Selected: true, Children: browserChildren},
+		{Label: "Bookmarks only", Detail: "Export bookmarks as HTML files", Selected: false},
 		{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
 		{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
+		{Label: "Credentials", Detail: "Windows Credential Manager vault", Selected: true},
+		{Label: "Certificates", Detail: "Personal certificates (valid, with private key)", Selected: true},
+		{Label: "Installed apps", Detail: "Export list + winget match", Selected: true},
 	}
 
 	return BackupWizardModel{
@@ -200,6 +208,17 @@ func (m BackupWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case backupDoneMsg:
 		m.step = BackupStepDone
+		// Try to get the actual result from the goroutine
+		if m.backupResultCh != nil {
+			select {
+			case result := <-m.backupResultCh:
+				if result != nil {
+					m.results = result.Results
+					m.logDir = result.LogDir
+				}
+			default:
+			}
+		}
 		if msg.result != nil {
 			m.results = msg.result.Results
 			m.logDir = msg.result.LogDir
@@ -314,15 +333,14 @@ func (m BackupWizardModel) handleDataStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.step = BackupStepUsers
 	case "tab":
 		m.advancedMode = !m.advancedMode
-		if m.advancedMode && len(m.dataSelector.Items) <= 4 {
+		if m.advancedMode && len(m.dataSelector.Items) <= 8 {
 			m.dataSelector.Items = append(m.dataSelector.Items,
 				SelectItem{Label: "Dev environment", Detail: ".ssh, .gitconfig, .docker"},
 				SelectItem{Label: "App configs", Detail: "VS Code settings, AppData"},
-				SelectItem{Label: "Installed apps", Detail: "Export list + winget match"},
 			)
 			m.dataSelector.rebuildFlat()
-		} else if !m.advancedMode && len(m.dataSelector.Items) > 4 {
-			m.dataSelector.Items = m.dataSelector.Items[:4]
+		} else if !m.advancedMode && len(m.dataSelector.Items) > 8 {
+			m.dataSelector.Items = m.dataSelector.Items[:8]
 			m.dataSelector.rebuildFlat()
 		}
 	default:
@@ -530,7 +548,12 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 	}
 
 	// Run backup in background goroutine; RunBackup closes ch when done.
-	go cmd.RunBackup(opts, allJ, ch)
+	resultCh := make(chan *cmd.BackupResult, 1)
+	go func() {
+		result, _ := cmd.RunBackup(opts, allJ, ch)
+		resultCh <- result
+	}()
+	m.backupResultCh = resultCh
 
 	return listenProgress(ch)
 }

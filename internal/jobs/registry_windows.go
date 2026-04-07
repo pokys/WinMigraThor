@@ -6,10 +6,13 @@ func init() {
 	allJobs = []Job{
 		&UserDataJob{},
 		&BrowsersJob{},
+		&BookmarksJob{},
 		&EmailJob{},
 		&WiFiJob{},
-		&DevEnvJob{},
+		&CredentialsJob{},
+		&CertificatesJob{},
 		&AppsJob{},
+		&DevEnvJob{},
 		&AppConfigJob{},
 	}
 }

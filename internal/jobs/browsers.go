@@ -214,11 +214,24 @@ func (j *BrowsersJob) Restore(source, userPath string, opts Options) (Result, er
 		return result, err
 	}
 
+	// Build selected browsers filter
+	selectedFilter := make(map[string]bool)
+	if len(opts.SelectedBrowsers) > 0 {
+		for _, name := range opts.SelectedBrowsers {
+			selectedFilter[strings.ToLower(name)] = true
+		}
+	}
+
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		browserName := e.Name()
+
+		// Filter by selected browsers
+		if len(selectedFilter) > 0 && !selectedFilter[strings.ToLower(browserName)] {
+			continue
+		}
 
 		// Map back to original location
 		var dstBase string
