@@ -3,8 +3,12 @@
 package jobs
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -22,6 +26,12 @@ type Browser struct {
 var firefoxConfigFiles = []string{
 	"profiles.ini",
 	"installs.ini",
+}
+
+var browserProcessNames = map[string][]string{
+	"chrome":  {"chrome.exe"},
+	"edge":    {"msedge.exe"},
+	"firefox": {"firefox.exe"},
 }
 
 // BrowsersJob handles browser profile backup/restore.
@@ -145,6 +155,16 @@ func (j *BrowsersJob) Backup(userPath, target string, opts Options) (Result, err
 		return result, nil
 	}
 
+	if running, err := runningSelectedBrowsers(browserNamesFromDetected(browsers)); err != nil {
+		result.Status = "error"
+		result.Errors = append(result.Errors, "check running browsers: "+err.Error())
+		return result, err
+	} else if len(running) > 0 {
+		result.Status = "error"
+		result.Errors = append(result.Errors, "close these browsers before backup: "+strings.Join(running, ", "))
+		return result, fmt.Errorf("browsers running: %s", strings.Join(running, ", "))
+	}
+
 	logFile := ""
 	if opts.LogDir != "" {
 		logFile = filepath.Join(opts.LogDir, "robocopy-browsers.log")
@@ -231,6 +251,29 @@ func (j *BrowsersJob) Restore(source, userPath string, opts Options) (Result, er
 		for _, name := range opts.SelectedBrowsers {
 			selectedFilter[strings.ToLower(name)] = true
 		}
+	}
+
+	var selectedNames []string
+	if len(selectedFilter) > 0 {
+		for name := range selectedFilter {
+			selectedNames = append(selectedNames, name)
+		}
+	} else {
+		for _, e := range entries {
+			if e.IsDir() {
+				selectedNames = append(selectedNames, strings.ToLower(e.Name()))
+			}
+		}
+	}
+
+	if running, err := runningSelectedBrowsers(selectedNames); err != nil {
+		result.Status = "error"
+		result.Errors = append(result.Errors, "check running browsers: "+err.Error())
+		return result, err
+	} else if len(running) > 0 {
+		result.Status = "error"
+		result.Errors = append(result.Errors, "close these browsers before restore: "+strings.Join(running, ", "))
+		return result, fmt.Errorf("browsers running: %s", strings.Join(running, ", "))
 	}
 
 	for _, e := range entries {
@@ -358,6 +401,75 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func browserNamesFromDetected(browsers []Browser) []string {
+	names := make([]string, 0, len(browsers))
+	for _, browser := range browsers {
+		names = append(names, strings.ToLower(browser.Name))
+	}
+	return names
+}
+
+func runningSelectedBrowsers(browserNames []string) ([]string, error) {
+	processes, err := listRunningProcesses()
+	if err != nil {
+		return nil, err
+	}
+
+	running := make([]string, 0)
+	seen := make(map[string]bool)
+	for _, browserName := range browserNames {
+		for _, processName := range browserProcessNames[strings.ToLower(browserName)] {
+			if processes[strings.ToLower(processName)] && !seen[browserName] {
+				seen[browserName] = true
+				running = append(running, browserDisplayName(browserName))
+			}
+		}
+	}
+	return running, nil
+}
+
+func listRunningProcesses() (map[string]bool, error) {
+	out, err := exec.Command("tasklist.exe", "/FO", "CSV", "/NH").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	reader := csv.NewReader(bytes.NewReader(out))
+	reader.FieldsPerRecord = -1
+
+	processes := make(map[string]bool)
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
+		}
+		if len(record) == 0 {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(record[0]))
+		if name != "" {
+			processes[name] = true
+		}
+	}
+	return processes, nil
+}
+
+func browserDisplayName(name string) string {
+	switch strings.ToLower(name) {
+	case "chrome":
+		return "Chrome"
+	case "edge":
+		return "Edge"
+	case "firefox":
+		return "Firefox"
+	default:
+		return name
+	}
 }
 
 func buildExcludeFlags(dirs []string) []string {
