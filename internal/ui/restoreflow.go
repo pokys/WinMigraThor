@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,10 +26,12 @@ type wingetCheckMsg struct {
 	installedApps  map[string]bool // winget ID → installed
 }
 type appInstallDoneMsg struct {
-	installed int
-	failed    int
+	installed  int
+	failed     int
+	skipped    int
+	commented  int
 	scriptPath string // non-empty when script mode was used
-	errors    []string
+	errors     []string
 }
 
 // RestoreWizardModel is the Bubble Tea model for the restore wizard.
@@ -88,6 +91,8 @@ type appInstallItem struct {
 	Selected       bool
 	AlreadyInstalled bool
 }
+
+var wingetInstalledRowRE = regexp.MustCompile(`^(.*?)\s{2,}(\S+)\s{2,}.*$`)
 
 func NewRestoreWizard() RestoreWizardModel {
 	ti := textinput.New()
@@ -327,6 +332,15 @@ func (m *RestoreWizardModel) buildDataSelector() {
 	m.dataSelector = NewSelector("Select what to restore:", items)
 }
 
+func (m *RestoreWizardModel) wantsAppReinstall() bool {
+	for _, item := range m.dataSelector.Items {
+		if item.Label == "Installed apps" {
+			return item.Selected
+		}
+	}
+	return false
+}
+
 // scanBackupFolders inspects the backup directory for actual user data folders.
 func (m *RestoreWizardModel) scanBackupFolders(backupPath string) []SelectItem {
 	var children []SelectItem
@@ -513,6 +527,9 @@ func (m *RestoreWizardModel) startRestore() tea.Cmd {
 		if name == "" {
 			continue
 		}
+		if name == "apps" {
+			continue
+		}
 		if len(item.Children) > 0 {
 			anyChild := false
 			for _, c := range item.Children {
@@ -637,6 +654,9 @@ func labelToJobName(label string) string {
 // ── Apps step: check winget + load apps ──────────────────────────────────────
 
 func (m *RestoreWizardModel) hasAppData() bool {
+	if !m.wantsAppReinstall() {
+		return false
+	}
 	backupPath := strings.TrimSpace(m.sourceInput.Value())
 	for _, name := range []string{"apps_winget.json", "apps.json"} {
 		if _, err := os.Stat(filepath.Join(backupPath, name)); err == nil {
@@ -649,45 +669,45 @@ func (m *RestoreWizardModel) hasAppData() bool {
 func (m *RestoreWizardModel) loadAppItems() {
 	backupPath := strings.TrimSpace(m.sourceInput.Value())
 
-	// Primary: apps_winget.json (only winget-matched apps)
-	wingetPath := filepath.Join(backupPath, "apps_winget.json")
-	if data, err := os.ReadFile(wingetPath); err == nil {
-		var wingetApps []struct {
-			WingetID     string `json:"winget_id"`
+	// Prefer apps.json so restore always shows the full list captured on the source PC.
+	allAppsPath := filepath.Join(backupPath, "apps.json")
+	if data, err := os.ReadFile(allAppsPath); err == nil {
+		var allApps []struct {
 			Name         string `json:"name"`
+			WingetID     string `json:"winget_id"`
 			MatchQuality string `json:"match_quality"`
 		}
-		if err := json.Unmarshal(data, &wingetApps); err == nil {
-			for _, app := range wingetApps {
+		if err := json.Unmarshal(data, &allApps); err == nil {
+			for _, app := range allApps {
+				if app.Name == "" {
+					continue
+				}
 				m.appItems = append(m.appItems, appInstallItem{
 					Name:         app.Name,
 					WingetID:     app.WingetID,
 					MatchQuality: app.MatchQuality,
-					Selected:     app.MatchQuality == "exact",
+					Selected:     app.WingetID != "" && app.MatchQuality == "exact",
 				})
 			}
 		}
 	}
 
-	// Fallback: apps.json — show all registry apps, winget match may be empty
+	// Legacy fallback for older backups that only contain apps_winget.json.
 	if len(m.appItems) == 0 {
-		allAppsPath := filepath.Join(backupPath, "apps.json")
-		if data, err := os.ReadFile(allAppsPath); err == nil {
-			var allApps []struct {
-				Name         string `json:"name"`
+		wingetPath := filepath.Join(backupPath, "apps_winget.json")
+		if data, err := os.ReadFile(wingetPath); err == nil {
+			var wingetApps []struct {
 				WingetID     string `json:"winget_id"`
+				Name         string `json:"name"`
 				MatchQuality string `json:"match_quality"`
 			}
-			if err := json.Unmarshal(data, &allApps); err == nil {
-				for _, app := range allApps {
-					if app.Name == "" {
-						continue
-					}
+			if err := json.Unmarshal(data, &wingetApps); err == nil {
+				for _, app := range wingetApps {
 					m.appItems = append(m.appItems, appInstallItem{
 						Name:         app.Name,
 						WingetID:     app.WingetID,
 						MatchQuality: app.MatchQuality,
-						Selected:     app.WingetID != "" && app.MatchQuality == "exact",
+						Selected:     app.MatchQuality == "exact",
 					})
 				}
 			}
@@ -746,6 +766,13 @@ func (m RestoreWizardModel) handleAppsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 		}
 	case "a":
 		for i := range m.appItems {
+			if m.appItems[i].AlreadyInstalled {
+				continue
+			}
+			if m.installMode == 1 && m.appItems[i].WingetID == "" {
+				m.appItems[i].Selected = false
+				continue
+			}
 			if !m.appItems[i].AlreadyInstalled {
 				m.appItems[i].Selected = true
 			}
@@ -1026,7 +1053,9 @@ func (m RestoreWizardModel) renderAppsStep() string {
 		}
 
 		matchNote := ""
-		if app.MatchQuality == "partial" {
+		if app.WingetID == "" {
+			matchNote = StyleMuted.Render(" (manual)")
+		} else if app.MatchQuality == "partial" {
 			matchNote = StyleWarning.Render(" (?)")
 		}
 
@@ -1107,8 +1136,12 @@ func (m RestoreWizardModel) renderDone() string {
 		if m.appInstallResult.scriptPath != "" {
 			sb.WriteString(fmt.Sprintf("    %s Script saved to: %s\n",
 				StyleSuccess.Render("✔"), StyleMuted.Render(m.appInstallResult.scriptPath)))
-			sb.WriteString(fmt.Sprintf("    %s apps included\n",
+			sb.WriteString(fmt.Sprintf("    %s winget installs written\n",
 				StyleMuted.Render(fmt.Sprintf("%d", m.appInstallResult.installed))))
+			if m.appInstallResult.commented > 0 {
+				sb.WriteString(fmt.Sprintf("    %s apps left as manual comments\n",
+					StyleMuted.Render(fmt.Sprintf("%d", m.appInstallResult.commented))))
+			}
 		} else {
 			if m.appInstallResult.installed > 0 {
 				sb.WriteString(fmt.Sprintf("    %s %d apps installed successfully\n",
@@ -1117,6 +1150,10 @@ func (m RestoreWizardModel) renderDone() string {
 			if m.appInstallResult.failed > 0 {
 				sb.WriteString(fmt.Sprintf("    %s %d apps failed\n",
 					StyleError.Render("✘"), m.appInstallResult.failed))
+			}
+			if m.appInstallResult.skipped > 0 {
+				sb.WriteString(fmt.Sprintf("    %s %d apps skipped (no winget match)\n",
+					StyleMuted.Render("•"), m.appInstallResult.skipped))
 			}
 		}
 		for _, e := range m.appInstallResult.errors {
@@ -1136,31 +1173,35 @@ func (m *RestoreWizardModel) runAppInstall(selected []appInstallItem, backupPath
 	return func() tea.Msg {
 		if mode == 0 {
 			// Script mode: generate reinstall.ps1
-			scriptPath := filepath.Join(backupPath, "reinstall.ps1")
+			scriptPath := filepath.Join(resolveScriptOutputDir(backupPath), "reinstall.ps1")
 			var sb strings.Builder
 			sb.WriteString("# Auto-generated by MigraThor\n")
 			sb.WriteString("# Run this script in PowerShell to reinstall apps\n\n")
+			var installable, commented int
 			for _, app := range selected {
 				if app.WingetID != "" {
 					sb.WriteString(fmt.Sprintf("Write-Host \"Installing %s...\"\n", app.Name))
 					sb.WriteString(fmt.Sprintf("winget install --id %s -e --accept-source-agreements --accept-package-agreements\n\n", app.WingetID))
+					installable++
 				} else {
 					sb.WriteString(fmt.Sprintf("# %s  (no winget ID — install manually)\n", app.Name))
+					commented++
 				}
 			}
 			err := os.WriteFile(scriptPath, []byte(sb.String()), 0o644)
 			if err != nil {
 				return appInstallDoneMsg{errors: []string{fmt.Sprintf("write script: %v", err)}}
 			}
-			return appInstallDoneMsg{installed: len(selected), scriptPath: scriptPath}
+			return appInstallDoneMsg{installed: installable, commented: commented, scriptPath: scriptPath}
 		}
 
 		// Execute mode: run winget install for each app
-		var installed, failed int
+		var installed, failed, skipped int
 		var errors []string
 		for _, app := range selected {
 			if app.WingetID == "" {
-				continue // no winget ID, skip in execute mode
+				skipped++
+				continue
 			}
 			out, err := exec.Command("winget.exe", "install",
 				"--id", app.WingetID,
@@ -1176,7 +1217,7 @@ func (m *RestoreWizardModel) runAppInstall(selected []appInstallItem, backupPath
 				installed++
 			}
 		}
-		return appInstallDoneMsg{installed: installed, failed: failed, errors: errors}
+		return appInstallDoneMsg{installed: installed, failed: failed, skipped: skipped, errors: errors}
 	}
 }
 
@@ -1194,15 +1235,24 @@ func getInstalledWingetApps() map[string]bool {
 	installed := make(map[string]bool)
 	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			// Try to match winget IDs (typically contain dots: Publisher.AppName)
-			for _, f := range fields {
-				if strings.Contains(f, ".") && !strings.HasPrefix(f, "-") {
-					installed[f] = true
-				}
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "Name") || strings.HasPrefix(line, "-") {
+			continue
+		}
+		matches := wingetInstalledRowRE.FindStringSubmatch(line)
+		if len(matches) == 3 {
+			id := strings.TrimSpace(matches[2])
+			if id != "" {
+				installed[id] = true
 			}
 		}
 	}
 	return installed
+}
+
+func resolveScriptOutputDir(fallback string) string {
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return home
+	}
+	return fallback
 }

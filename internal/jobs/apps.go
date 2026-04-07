@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +32,11 @@ type WingetEntry struct {
 	WingetID     string `json:"winget_id"`
 	Name         string `json:"name"`
 	MatchQuality string `json:"match_quality"`
+}
+
+type wingetCandidate struct {
+	Name string
+	ID   string
 }
 
 // AppsJob detects installed apps and generates reinstall scripts.
@@ -110,74 +117,215 @@ func scanRegistry() []AppInfo {
 }
 
 func matchWithWinget(apps []AppInfo) []AppInfo {
-	// Try to get winget list output
-	out, err := exec.Command("winget.exe", "list", "--source", "winget", "--output", "json").Output()
-	if err != nil {
-		// Fallback: parse table output
-		out, err = exec.Command("winget.exe", "list").Output()
-		if err != nil {
-			return apps
-		}
-		return matchFromTableOutput(apps, string(out))
-	}
-
-	// Parse JSON output
-	var wingetList []struct {
-		ID   string `json:"Id"`
-		Name string `json:"Name"`
-	}
-	if err := json.Unmarshal(out, &wingetList); err != nil {
-		return apps
-	}
-
-	wingetMap := make(map[string]string) // name (lower) -> ID
-	for _, w := range wingetList {
-		wingetMap[strings.ToLower(w.Name)] = w.ID
-	}
-
+	cache := make(map[string]AppInfo)
 	for i, app := range apps {
-		lower := strings.ToLower(app.Name)
-		if id, ok := wingetMap[lower]; ok {
-			apps[i].WingetID = id
-			apps[i].MatchQuality = "exact"
+		key := normalizeWingetText(app.Name)
+		if key == "" {
+			continue
 		}
+		if cached, ok := cache[key]; ok {
+			apps[i].WingetID = cached.WingetID
+			apps[i].MatchQuality = cached.MatchQuality
+			continue
+		}
+
+		matched := app
+		id, quality := findWingetMatch(app)
+		if id != "" {
+			matched.WingetID = id
+			matched.MatchQuality = quality
+		}
+		cache[key] = matched
+		apps[i].WingetID = matched.WingetID
+		apps[i].MatchQuality = matched.MatchQuality
 	}
 	return apps
 }
 
-func matchFromTableOutput(apps []AppInfo, output string) []AppInfo {
-	lines := strings.Split(output, "\n")
-	// Build a map from app name (lower) to winget ID from the table
-	wingetMap := make(map[string]string)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "Name") {
-			continue
-		}
-		// Table format: Name  Id  Version  Available  Source
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			wingetMap[strings.ToLower(fields[0])] = fields[1]
+var wingetTableRowRE = regexp.MustCompile(`^(.*?)\s{2,}(\S+)\s{2,}.*$`)
+
+func findWingetMatch(app AppInfo) (string, string) {
+	candidates := searchWingetCatalog(app.Name)
+	if len(candidates) == 0 && app.Publisher != "" {
+		candidates = searchWingetCatalog(app.Publisher + " " + app.Name)
+	}
+	if len(candidates) == 0 {
+		return "", "none"
+	}
+
+	best, ok := rankWingetCandidate(app, candidates)
+	if !ok {
+		return "", "none"
+	}
+	return best.ID, best.MatchQuality
+}
+
+func searchWingetCatalog(query string) []wingetCandidate {
+	if strings.TrimSpace(query) == "" {
+		return nil
+	}
+
+	args := []string{"search", "--source", "winget", "--name", query}
+	out, err := exec.Command("winget.exe", args...).Output()
+	if err != nil {
+		out, err = exec.Command("winget.exe", "search", query, "--source", "winget").Output()
+		if err != nil {
+			return nil
 		}
 	}
 
-	for i, app := range apps {
-		lower := strings.ToLower(app.Name)
-		if id, ok := wingetMap[lower]; ok {
-			apps[i].WingetID = id
-			apps[i].MatchQuality = "exact"
-		} else {
-			// Try partial match
-			for wName, wID := range wingetMap {
-				if strings.Contains(lower, wName) || strings.Contains(wName, lower) {
-					apps[i].WingetID = wID
-					apps[i].MatchQuality = "partial"
-					break
+	candidates := parseWingetTableCandidates(string(out))
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].Name == candidates[j].Name {
+			return candidates[i].ID < candidates[j].ID
+		}
+		return candidates[i].Name < candidates[j].Name
+	})
+	return candidates
+}
+
+func parseWingetTableCandidates(output string) []wingetCandidate {
+	lines := strings.Split(output, "\n")
+	seen := make(map[string]bool)
+	var candidates []wingetCandidate
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "-") || strings.HasPrefix(line, "Name") || strings.HasPrefix(line, "No package found") {
+			continue
+		}
+		matches := wingetTableRowRE.FindStringSubmatch(line)
+		if len(matches) == 3 {
+			name := strings.TrimSpace(matches[1])
+			id := strings.TrimSpace(matches[2])
+			if name != "" && id != "" {
+				key := strings.ToLower(name) + "\x00" + strings.ToLower(id)
+				if !seen[key] {
+					seen[key] = true
+					candidates = append(candidates, wingetCandidate{Name: name, ID: id})
 				}
 			}
 		}
 	}
-	return apps
+	return candidates
+}
+
+func rankWingetCandidate(app AppInfo, candidates []wingetCandidate) (struct {
+	ID           string
+	MatchQuality string
+}, bool) {
+	type scored struct {
+		wingetCandidate
+		score        int
+		matchQuality string
+	}
+
+	targetName := normalizeWingetText(app.Name)
+	targetPublisher := normalizeWingetText(app.Publisher)
+
+	var best scored
+	best.score = -1
+
+	for _, candidate := range candidates {
+		candidateName := normalizeWingetText(candidate.Name)
+		candidateID := normalizeWingetText(candidate.ID)
+		if candidateName == "" || candidateID == "" {
+			continue
+		}
+
+		score := 0
+		quality := "none"
+
+		switch {
+		case candidateName == targetName:
+			score = 100
+			quality = "exact"
+		case strings.Contains(candidateName, targetName) || strings.Contains(targetName, candidateName):
+			score = 60
+			quality = "partial"
+		default:
+			shared := sharedWingetTokens(targetName, candidateName)
+			if shared > 0 {
+				score = shared * 10
+				quality = "partial"
+			}
+		}
+
+		if score > 0 && targetPublisher != "" {
+			if strings.Contains(candidateName, targetPublisher) || strings.Contains(candidateID, targetPublisher) {
+				score += 15
+			}
+		}
+
+		if score > best.score || (score == best.score && len(candidateName) < len(normalizeWingetText(best.Name))) {
+			best = scored{
+				wingetCandidate: candidate,
+				score:           score,
+				matchQuality:    quality,
+			}
+		}
+	}
+
+	if best.score >= 100 {
+		return struct {
+			ID           string
+			MatchQuality string
+		}{ID: best.ID, MatchQuality: "exact"}, true
+	}
+	if best.score >= 60 {
+		return struct {
+			ID           string
+			MatchQuality string
+		}{ID: best.ID, MatchQuality: "partial"}, true
+	}
+	return struct {
+		ID           string
+		MatchQuality string
+	}{}, false
+}
+
+func normalizeWingetText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer(
+		"(", " ",
+		")", " ",
+		"[", " ",
+		"]", " ",
+		"-", " ",
+		"_", " ",
+		".", " ",
+		",", " ",
+		"/", " ",
+		"\\", " ",
+		"'", "",
+		`"`, "",
+	)
+	value = replacer.Replace(value)
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func sharedWingetTokens(a, b string) int {
+	if a == "" || b == "" {
+		return 0
+	}
+	tokensA := strings.Fields(a)
+	tokensB := strings.Fields(b)
+	setB := make(map[string]bool, len(tokensB))
+	for _, token := range tokensB {
+		setB[token] = true
+	}
+	shared := 0
+	for _, token := range tokensA {
+		if len(token) < 3 {
+			continue
+		}
+		if setB[token] {
+			shared++
+		}
+	}
+	return shared
 }
 
 func (j *AppsJob) Backup(userPath, target string, opts Options) (Result, error) {
