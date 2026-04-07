@@ -16,8 +16,9 @@ import (
 // BackupOptions are passed from CLI/TUI to the backup command.
 type BackupOptions struct {
 	Target           string
-	Users            []string   // user paths to back up
-	JobNames         []string   // e.g. ["userdata","browsers","wifi"]
+	Users            []string // user paths to back up
+	JobNames         []string // e.g. ["userdata","browsers","wifi"]
+	SelectedFolders  []string // subset of standard folders for userdata job (nil = all)
 	DryRun           bool
 	Compress         bool
 	PasswordMode     string
@@ -33,7 +34,12 @@ type BackupResult struct {
 }
 
 // RunBackup performs the backup operation.
-func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan<- jobs.Progress) (*BackupResult, error) {
+// The caller is responsible for creating progressCh; RunBackup closes it when done.
+func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Progress) (*BackupResult, error) {
+	if progressCh != nil {
+		defer close(progressCh)
+	}
+
 	start := time.Now()
 
 	// Setup log dir inside target
