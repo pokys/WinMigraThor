@@ -200,7 +200,7 @@ func (j *AppsJob) Backup(userPath, target string, opts Options) (Result, error) 
 	}
 
 	// Save apps_winget.json (only matched apps)
-	var wingetApps []WingetEntry
+	wingetApps := make([]WingetEntry, 0)
 	for _, app := range apps {
 		if app.WingetID != "" {
 			wingetApps = append(wingetApps, WingetEntry{
