@@ -103,6 +103,7 @@ func NewRestoreWizard() RestoreWizardModel {
 	return RestoreWizardModel{
 		sourceInput: ti,
 		step:        RestoreStepSource,
+		conflictCursor: 1,
 	}
 }
 
@@ -504,7 +505,7 @@ func (m RestoreWizardModel) handleConflictStep(msg tea.KeyMsg) (tea.Model, tea.C
 			m.conflictCursor--
 		}
 	case "down", "j":
-		if m.conflictCursor < 3 {
+		if m.conflictCursor < 1 {
 			m.conflictCursor++
 		}
 	case " ":
@@ -581,8 +582,8 @@ func (m *RestoreWizardModel) startRestore() tea.Cmd {
 		}
 	}
 
-	conflictStrategies := []string{"ask", "overwrite", "skip", "rename"}
-	strategy := "ask"
+	conflictStrategies := []string{"overwrite", "skip"}
+	strategy := "skip"
 	if m.conflictCursor < len(conflictStrategies) {
 		strategy = conflictStrategies[m.conflictCursor]
 	}
@@ -915,13 +916,12 @@ func (m RestoreWizardModel) renderMappingStep() string {
 
 func (m RestoreWizardModel) renderConflictStep() string {
 	options := []string{
-		"Ask me each time",
 		"Overwrite all (use backup version)",
 		"Skip all (keep existing)",
-		"Rename backup files (_restored suffix)",
 	}
 	var sb strings.Builder
-	sb.WriteString("\n  When a file already exists on this machine:\n\n")
+	sb.WriteString("\n  When a file already exists on this machine:\n")
+	sb.WriteString("  " + StyleMuted.Render("Only strategies currently supported by the restore engine are shown.") + "\n\n")
 	for i, opt := range options {
 		radio := RadioEmpty
 		if i == m.conflictCursor {
