@@ -39,6 +39,11 @@ type wingetCandidate struct {
 	ID   string
 }
 
+type wingetMatchResult struct {
+	ID           string
+	MatchQuality string
+}
+
 // AppsJob detects installed apps and generates reinstall scripts.
 type AppsJob struct{}
 
@@ -117,6 +122,7 @@ func scanRegistry() []AppInfo {
 }
 
 func matchWithWinget(apps []AppInfo) []AppInfo {
+	installedCandidates := getInstalledWingetCandidates()
 	cache := make(map[string]AppInfo)
 	for i, app := range apps {
 		key := normalizeWingetText(app.Name)
@@ -130,7 +136,7 @@ func matchWithWinget(apps []AppInfo) []AppInfo {
 		}
 
 		matched := app
-		id, quality := findWingetMatch(app)
+		id, quality := findWingetMatch(app, installedCandidates)
 		if id != "" {
 			matched.WingetID = id
 			matched.MatchQuality = quality
@@ -144,20 +150,21 @@ func matchWithWinget(apps []AppInfo) []AppInfo {
 
 var wingetTableRowRE = regexp.MustCompile(`^(.*?)\s{2,}(\S+)\s{2,}.*$`)
 
-func findWingetMatch(app AppInfo) (string, string) {
-	candidates := searchWingetCatalog(app.Name)
-	if len(candidates) == 0 && app.Publisher != "" {
-		candidates = searchWingetCatalog(app.Publisher + " " + app.Name)
-	}
-	if len(candidates) == 0 {
-		return "", "none"
+func findWingetMatch(app AppInfo, installedCandidates []wingetCandidate) (string, string) {
+	if best, ok := rankWingetCandidate(app, installedCandidates); ok {
+		return best.ID, best.MatchQuality
 	}
 
-	best, ok := rankWingetCandidate(app, candidates)
-	if !ok {
-		return "", "none"
+	for _, query := range buildWingetSearchQueries(app) {
+		candidates := searchWingetCatalog(query)
+		if len(candidates) == 0 {
+			continue
+		}
+		if best, ok := rankWingetCandidate(app, candidates); ok {
+			return best.ID, best.MatchQuality
+		}
 	}
-	return best.ID, best.MatchQuality
+	return "", "none"
 }
 
 func searchWingetCatalog(query string) []wingetCandidate {
@@ -187,6 +194,14 @@ func searchWingetCatalog(query string) []wingetCandidate {
 	return candidates
 }
 
+func getInstalledWingetCandidates() []wingetCandidate {
+	out, err := exec.Command("winget.exe", "list", "--source", "winget").Output()
+	if err != nil {
+		return nil
+	}
+	return parseWingetTableCandidates(string(out))
+}
+
 func parseWingetTableCandidates(output string) []wingetCandidate {
 	lines := strings.Split(output, "\n")
 	seen := make(map[string]bool)
@@ -212,10 +227,7 @@ func parseWingetTableCandidates(output string) []wingetCandidate {
 	return candidates
 }
 
-func rankWingetCandidate(app AppInfo, candidates []wingetCandidate) (struct {
-	ID           string
-	MatchQuality string
-}, bool) {
+func rankWingetCandidate(app AppInfo, candidates []wingetCandidate) (wingetMatchResult, bool) {
 	type scored struct {
 		wingetCandidate
 		score        int
@@ -269,21 +281,12 @@ func rankWingetCandidate(app AppInfo, candidates []wingetCandidate) (struct {
 	}
 
 	if best.score >= 100 {
-		return struct {
-			ID           string
-			MatchQuality string
-		}{ID: best.ID, MatchQuality: "exact"}, true
+		return wingetMatchResult{ID: best.ID, MatchQuality: "exact"}, true
 	}
 	if best.score >= 60 {
-		return struct {
-			ID           string
-			MatchQuality string
-		}{ID: best.ID, MatchQuality: "partial"}, true
+		return wingetMatchResult{ID: best.ID, MatchQuality: "partial"}, true
 	}
-	return struct {
-		ID           string
-		MatchQuality string
-	}{}, false
+	return wingetMatchResult{}, false
 }
 
 func normalizeWingetText(value string) string {
@@ -304,6 +307,50 @@ func normalizeWingetText(value string) string {
 	)
 	value = replacer.Replace(value)
 	return strings.Join(strings.Fields(value), " ")
+}
+
+func buildWingetSearchQueries(app AppInfo) []string {
+	var queries []string
+	seen := make(map[string]bool)
+
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		key := strings.ToLower(value)
+		if !seen[key] {
+			seen[key] = true
+			queries = append(queries, value)
+		}
+	}
+
+	add(app.Name)
+
+	nameNoParens := strings.TrimSpace(regexp.MustCompile(`\s*\([^)]*\)`).ReplaceAllString(app.Name, ""))
+	add(nameNoParens)
+
+	normalizedName := normalizeWingetText(app.Name)
+	if normalizedName != "" {
+		add(normalizedName)
+
+		tokens := strings.Fields(normalizedName)
+		filtered := make([]string, 0, len(tokens))
+		for _, token := range tokens {
+			switch token {
+			case "x64", "x86", "arm64", "cs", "cz", "en", "enus", "install", "only":
+				continue
+			}
+			filtered = append(filtered, token)
+		}
+		add(strings.Join(filtered, " "))
+	}
+
+	if app.Publisher != "" && nameNoParens != "" {
+		add(app.Publisher + " " + nameNoParens)
+	}
+
+	return queries
 }
 
 func sharedWingetTokens(a, b string) int {
