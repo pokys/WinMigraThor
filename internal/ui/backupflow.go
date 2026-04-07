@@ -22,7 +22,9 @@ type UsersScannedMsg struct {
 }
 
 type backupProgressMsg jobs.Progress
-type backupDoneMsg struct{ result *cmd.BackupResult }
+type backupDoneMsg struct {
+	result *cmd.BackupResult
+}
 
 // ── Job label → internal name mapping ─────────────────────────────────────────
 
@@ -89,13 +91,13 @@ type BackupWizardModel struct {
 	summaryContent string
 
 	// Step 6: Running
-	jobRows        []JobProgressRow
-	overallPct     float64
-	warnings       []string
-	cancelConfirm  bool
-	progressCh     chan jobs.Progress
-	backupResultCh chan *cmd.BackupResult
-	startTime      time.Time
+	jobRows         []JobProgressRow
+	overallPct      float64
+	warnings        []string
+	cancelConfirm   bool
+	progressCh      chan jobs.Progress
+	backupResultPtr *cmd.BackupResult
+	startTime       time.Time
 
 	// Step 7: Done
 	results []jobs.Result
@@ -208,28 +210,20 @@ func (m BackupWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case backupDoneMsg:
 		m.step = BackupStepDone
-		// Try to get the actual result from the goroutine
-		if m.backupResultCh != nil {
-			select {
-			case result := <-m.backupResultCh:
-				if result != nil {
-					m.results = result.Results
-					m.logDir = result.LogDir
-				}
-			default:
-			}
+		// RunBackup closes the channel after returning, so the result
+		// pointer has been populated by the goroutine at this point.
+		if m.backupResultPtr != nil && len(m.backupResultPtr.Results) > 0 {
+			m.results = m.backupResultPtr.Results
+			m.logDir = m.backupResultPtr.LogDir
 		}
-		if msg.result != nil {
-			m.results = msg.result.Results
-			m.logDir = msg.result.LogDir
-		}
-		// Mark all rows done
+		// Mark all rows done and update overall progress
 		for i := range m.jobRows {
 			if m.jobRows[i].Bar.Status == "running" || m.jobRows[i].Bar.Status == "waiting" {
 				m.jobRows[i].Bar.Status = "done"
 				m.jobRows[i].Bar.Percent = 1.0
 			}
 		}
+		m.overallPct = 1.0
 		return m, nil
 
 	case tea.KeyMsg:
@@ -548,12 +542,17 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 	}
 
 	// Run backup in background goroutine; RunBackup closes ch when done.
-	resultCh := make(chan *cmd.BackupResult, 1)
+	// We store the result pointer atomically — by the time the progress
+	// channel closes (triggering backupDoneMsg), RunBackup has returned
+	// and the pointer is set.
+	m.backupResultPtr = new(cmd.BackupResult)
+	resultPtr := m.backupResultPtr
 	go func() {
 		result, _ := cmd.RunBackup(opts, allJ, ch)
-		resultCh <- result
+		if result != nil {
+			*resultPtr = *result
+		}
 	}()
-	m.backupResultCh = resultCh
 
 	return listenProgress(ch)
 }

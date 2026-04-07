@@ -1,7 +1,6 @@
 package logging
 
 import (
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ func Setup(logDir string) (*Logger, error) {
 		return nil, err
 	}
 
-	mainWriter := io.MultiWriter(mf, os.Stderr)
+	mainWriter := io.Writer(mf)
 	mainHandler := slog.NewTextHandler(mainWriter, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
