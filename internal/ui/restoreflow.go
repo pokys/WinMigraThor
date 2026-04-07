@@ -104,6 +104,7 @@ func NewRestoreWizard() RestoreWizardModel {
 		sourceInput: ti,
 		step:        RestoreStepSource,
 		conflictCursor: 1,
+		installMode:    1,
 	}
 }
 

@@ -108,6 +108,16 @@ func detectBrowsers(userPath string) []Browser {
 	return browsers
 }
 
+// DetectedBrowserNames returns the supported browsers detected for a user profile.
+func DetectedBrowserNames(userPath string) []string {
+	browsers := detectBrowsers(userPath)
+	names := make([]string, 0, len(browsers))
+	for _, browser := range browsers {
+		names = append(names, browser.Name)
+	}
+	return names
+}
+
 func (j *BrowsersJob) Scan(userPath string) (ScanResult, error) {
 	browsers := detectBrowsers(userPath)
 	var items []ScanItem

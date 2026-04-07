@@ -5,6 +5,7 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/pokys/winmigrathor/internal/checks"
 	"github.com/pokys/winmigrathor/internal/ui"
 )
 
@@ -16,6 +17,17 @@ var (
 
 func main() {
 	args := os.Args[1:]
+
+	if shouldRequireAdmin(args) {
+		relaunched, err := checks.EnsureAdminRelaunch(os.Args)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error requesting administrator rights: %v\n", err)
+			os.Exit(1)
+		}
+		if relaunched {
+			return
+		}
+	}
 
 	if len(args) == 0 {
 		runTUI(ui.ScreenMainMenu, false)
@@ -43,6 +55,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", args[0])
 		printUsage()
 		os.Exit(2)
+	}
+}
+
+func shouldRequireAdmin(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	switch args[0] {
+	case "version", "--version", "-v", "help", "--help", "-h":
+		return false
+	default:
+		return true
 	}
 }
 
