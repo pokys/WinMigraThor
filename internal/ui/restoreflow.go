@@ -48,12 +48,12 @@ type RestoreWizardModel struct {
 	conflictCursor int
 
 	// Step 5: Running
-	jobRows         []JobProgressRow
-	overallPct      float64
-	cancelConfirm   bool
-	progressCh      chan jobs.Progress
-	restoreResultCh chan *cmd.RestoreResult
-	startTime       time.Time
+	jobRows          []JobProgressRow
+	overallPct       float64
+	cancelConfirm    bool
+	progressCh       chan jobs.Progress
+	restoreResultPtr *cmd.RestoreResult
+	startTime        time.Time
 
 	// Step 6: App reinstall
 	appItems        []appInstallItem
@@ -107,20 +107,9 @@ func (m RestoreWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listenRestoreProgress(m.progressCh)
 
 	case restoreDoneMsg:
-		// Try to get the actual result from the goroutine
-		if m.restoreResultCh != nil {
-			select {
-			case result := <-m.restoreResultCh:
-				if result != nil {
-					m.results = result.Results
-					m.logDir = result.LogDir
-				}
-			default:
-			}
-		}
-		if msg.result != nil {
-			m.results = msg.result.Results
-			m.logDir = msg.result.LogDir
+		if m.restoreResultPtr != nil && len(m.restoreResultPtr.Results) > 0 {
+			m.results = m.restoreResultPtr.Results
+			m.logDir = m.restoreResultPtr.LogDir
 		}
 		// Mark all rows done
 		for i := range m.jobRows {
@@ -589,12 +578,14 @@ func (m *RestoreWizardModel) startRestore() tea.Cmd {
 		SelectedBrowsers: selectedBrowsers,
 	}
 
-	resultCh := make(chan *cmd.RestoreResult, 1)
+	m.restoreResultPtr = new(cmd.RestoreResult)
+	resultPtr := m.restoreResultPtr
 	go func() {
 		result, _ := cmd.RunRestore(opts, allJ, ch)
-		resultCh <- result
+		if result != nil {
+			*resultPtr = *result
+		}
 	}()
-	m.restoreResultCh = resultCh
 
 	return listenRestoreProgress(ch)
 }
