@@ -53,14 +53,10 @@ jobs:
           git push --delete origin latest 2>/dev/null || true
 
           # Create fresh latest release
+          NOTES="Automaticky sestaveno z main. Commit: ${GITHUB_SHA}. Datum: $(date -u +"%Y-%m-%d %H:%M UTC"). Stahni migrator.exe nize a spust jako spravce."
           gh release create latest migrator.exe \
             --title "migrator latest" \
-            --notes "Automaticky sestaveno z \`main\`.
-
-**Commit:** \`${GITHUB_SHA}\`
-**Datum:** $(date -u +"%Y-%m-%d %H:%M UTC")
-
-Stáhni \`migrator.exe\` níže a spusť jako správce." \
+            --notes "$NOTES" \
             --prerelease
 
       # ── Versioned release (on tag v*) ──────────────────────────────────────
