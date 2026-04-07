@@ -5,18 +5,13 @@ on:
     branches: [main]
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Version string (e.g. 1.2.3)"
-        required: false
-        default: "dev"
 
 permissions:
   contents: write
 
 jobs:
   build-and-release:
-    name: Build migrator.exe & publish release
+    name: Build migrator.exe
     runs-on: ubuntu-latest
 
     steps:
@@ -29,34 +24,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            RELEASE_TAG="$GITHUB_REF_NAME"
-            RELEASE_NAME="migrator v${VERSION}"
-            PRERELEASE=false
-          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.version }}" != "dev" ]]; then
-            VERSION="${{ inputs.version }}"
-            RELEASE_TAG="latest"
-            RELEASE_NAME="migrator latest"
-            PRERELEASE=true
-          else
-            VERSION="0.0.0+${GITHUB_SHA::8}"
-            RELEASE_TAG="latest"
-            RELEASE_NAME="migrator latest"
-            PRERELEASE=true
-          fi
-          echo "version=$VERSION"           >> "$GITHUB_OUTPUT"
-          echo "release_tag=$RELEASE_TAG"   >> "$GITHUB_OUTPUT"
-          echo "release_name=$RELEASE_NAME" >> "$GITHUB_OUTPUT"
-          echo "prerelease=$PRERELEASE"     >> "$GITHUB_OUTPUT"
-          echo "→ version=$VERSION  tag=$RELEASE_TAG  prerelease=$PRERELEASE"
-
-      - name: Download dependencies
-        run: go mod download
-
       - name: Build
         env:
           GOOS: windows
@@ -64,25 +31,45 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%d")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0+${GITHUB_SHA::8}"
+          fi
           go build \
-            -ldflags "-s -w -X main.version=${{ steps.version.outputs.version }} -X main.buildDate=${BUILD_DATE}" \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${BUILD_DATE}" \
             -o migrator.exe \
             .
           ls -lh migrator.exe
-          file migrator.exe
 
-      # For "latest" release: delete the existing tag so the release can be recreated
-      - name: Delete existing 'latest' tag (rolling release only)
-        if: steps.version.outputs.release_tag == 'latest'
-        run: git push --delete origin latest 2>/dev/null || true
+      # ── Rolling "latest" release (every push to main) ──────────────────────
+      - name: Publish latest release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Delete existing latest release + tag if present
+          gh release delete latest --yes 2>/dev/null || true
+          git push --delete origin latest 2>/dev/null || true
 
-      - name: Publish release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.release_tag }}
-          name: ${{ steps.version.outputs.release_name }}
-          prerelease: ${{ steps.version.outputs.prerelease }}
-          files: migrator.exe
-          generate_release_notes: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          body: |
-            ${{ steps.version.outputs.release_tag == 'latest' && format('**Commit:** `{0}`  \n**Datum:** {1}  \n\nAutomaticky sestaveno z každého push do `main`. Pro stabilní verze použij tagged release.', github.sha, github.event.head_commit.timestamp) || '' }}
+          # Create fresh latest release
+          gh release create latest migrator.exe \
+            --title "migrator latest" \
+            --notes "Automaticky sestaveno z \`main\`.
+
+**Commit:** \`${GITHUB_SHA}\`
+**Datum:** $(date -u +"%Y-%m-%d %H:%M UTC")
+
+Stáhni \`migrator.exe\` níže a spusť jako správce." \
+            --prerelease
+
+      # ── Versioned release (on tag v*) ──────────────────────────────────────
+      - name: Publish versioned release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          gh release create "${GITHUB_REF_NAME}" migrator.exe \
+            --title "migrator v${VERSION}" \
+            --generate-notes
