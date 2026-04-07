@@ -9,6 +9,7 @@ func init() {
 		&BookmarksJob{},
 		&EmailJob{},
 		&WiFiJob{},
+		&VPNJob{},
 		&CredentialsJob{},
 		&CertificatesJob{},
 		&AppsJob{},

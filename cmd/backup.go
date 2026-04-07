@@ -5,9 +5,11 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pokys/winmigrathor/internal/config"
+	"github.com/pokys/winmigrathor/internal/engine"
 	"github.com/pokys/winmigrathor/internal/jobs"
 	"github.com/pokys/winmigrathor/internal/logging"
 	"github.com/pokys/winmigrathor/internal/meta"
@@ -137,6 +139,33 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 	cfg.Jobs = opts.JobNames
 	if err := config.Save(cfg, opts.Target); err != nil {
 		log.Error("save config", "error", err)
+	}
+
+	if opts.Compress {
+		zipPath := strings.TrimRight(opts.Target, `\/`) + ".zip"
+		log.Info("compressing backup", "source", opts.Target, "zip", zipPath)
+		if err := engine.Compress(opts.Target, zipPath, nil); err != nil {
+			log.Error("compress backup", "error", err)
+			allResults = append(allResults, jobs.Result{
+				JobName:   "compression",
+				Status:    "error",
+				Errors:    []string{err.Error()},
+				Duration:  time.Since(start).Round(time.Second).String(),
+			})
+		} else {
+			var zipSize int64
+			if info, err := os.Stat(zipPath); err == nil {
+				zipSize = info.Size()
+			}
+			allResults = append(allResults, jobs.Result{
+				JobName:    "compression",
+				Status:     "success",
+				SizeBytes:  zipSize,
+				FilesCount: 1,
+				Warnings:   []string{fmt.Sprintf("ZIP archive created at %s", zipPath)},
+				Duration:   time.Since(start).Round(time.Second).String(),
+			})
+		}
 	}
 
 	log.Info("backup complete", "duration", duration, "total_size", m.TotalSize)
