@@ -100,9 +100,10 @@ type BackupWizardModel struct {
 	startTime       time.Time
 
 	// Step 7: Done
-	results []jobs.Result
-	logDir  string
-	dryRun  bool
+	results       []jobs.Result
+	logDir        string
+	dryRun        bool
+	finalDuration time.Duration
 }
 
 func NewBackupWizard(dryRun bool) BackupWizardModel {
@@ -130,10 +131,8 @@ func NewBackupWizard(dryRun bool) BackupWizardModel {
 		{Label: "User folders", Detail: "Desktop, Documents, Downloads, ...", Selected: true, Children: folderChildren},
 		{Label: "Browsers", Detail: "Full profiles (Chrome, Edge, Firefox)", Selected: true, Children: browserChildren},
 		{Label: "Bookmarks only", Detail: "Export bookmarks as HTML files", Selected: false},
-		{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
 		{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
 		{Label: "Credentials", Detail: "Windows Credential Manager vault", Selected: true},
-		{Label: "Certificates", Detail: "Personal certificates (valid, with private key)", Selected: true},
 		{Label: "Installed apps", Detail: "Export list + winget match", Selected: true},
 	}
 
@@ -210,6 +209,9 @@ func (m BackupWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case backupDoneMsg:
 		m.step = BackupStepDone
+		if !m.startTime.IsZero() {
+			m.finalDuration = time.Since(m.startTime).Round(time.Second)
+		}
 		// RunBackup closes the channel after returning, so the result
 		// pointer has been populated by the goroutine at this point.
 		if m.backupResultPtr != nil && len(m.backupResultPtr.Results) > 0 {
@@ -327,14 +329,16 @@ func (m BackupWizardModel) handleDataStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.step = BackupStepUsers
 	case "tab":
 		m.advancedMode = !m.advancedMode
-		if m.advancedMode && len(m.dataSelector.Items) <= 8 {
+		if m.advancedMode && len(m.dataSelector.Items) <= 6 {
 			m.dataSelector.Items = append(m.dataSelector.Items,
+				SelectItem{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
+				SelectItem{Label: "Certificates", Detail: "Personal certificates (valid, with private key)", Selected: true},
 				SelectItem{Label: "Dev environment", Detail: ".ssh, .gitconfig, .docker"},
 				SelectItem{Label: "App configs", Detail: "VS Code settings, AppData"},
 			)
 			m.dataSelector.rebuildFlat()
-		} else if !m.advancedMode && len(m.dataSelector.Items) > 8 {
-			m.dataSelector.Items = m.dataSelector.Items[:8]
+		} else if !m.advancedMode && len(m.dataSelector.Items) > 6 {
+			m.dataSelector.Items = m.dataSelector.Items[:6]
 			m.dataSelector.rebuildFlat()
 		}
 	default:
@@ -786,8 +790,8 @@ func (m BackupWizardModel) renderDone() string {
 
 	sb.WriteString("\n  " + title + "\n\n")
 
-	if !m.startTime.IsZero() {
-		sb.WriteString(fmt.Sprintf("  Doba:      %s\n", time.Since(m.startTime).Round(time.Second)))
+	if m.finalDuration > 0 {
+		sb.WriteString(fmt.Sprintf("  Doba:      %s\n", m.finalDuration))
 	}
 	sb.WriteString("\n  Výsledky:\n")
 	for _, r := range m.results {

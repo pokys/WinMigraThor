@@ -24,6 +24,12 @@ type wingetCheckMsg struct {
 	available      bool
 	installedApps  map[string]bool // winget ID → installed
 }
+type appInstallDoneMsg struct {
+	installed int
+	failed    int
+	scriptPath string // non-empty when script mode was used
+	errors    []string
+}
 
 // RestoreWizardModel is the Bubble Tea model for the restore wizard.
 type RestoreWizardModel struct {
@@ -56,15 +62,18 @@ type RestoreWizardModel struct {
 	startTime        time.Time
 
 	// Step 6: App reinstall
-	appItems        []appInstallItem
-	appCursor       int
-	installMode     int // 0=script, 1=execute
-	wingetAvailable bool
-	wingetChecked   bool
+	appItems         []appInstallItem
+	appCursor        int
+	installMode      int // 0=script, 1=execute
+	wingetAvailable  bool
+	wingetChecked    bool
+	appInstalling    bool
+	appInstallResult *appInstallDoneMsg
 
 	// Step 7: Done
-	results []jobs.Result
-	logDir  string
+	results       []jobs.Result
+	logDir        string
+	finalDuration time.Duration
 }
 
 type userMapping struct {
@@ -107,6 +116,9 @@ func (m RestoreWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, listenRestoreProgress(m.progressCh)
 
 	case restoreDoneMsg:
+		if !m.startTime.IsZero() {
+			m.finalDuration = time.Since(m.startTime).Round(time.Second)
+		}
 		if m.restoreResultPtr != nil && len(m.restoreResultPtr.Results) > 0 {
 			m.results = m.restoreResultPtr.Results
 			m.logDir = m.restoreResultPtr.LogDir
@@ -140,6 +152,12 @@ func (m RestoreWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.appItems[i].Selected = false
 			}
 		}
+		return m, nil
+
+	case appInstallDoneMsg:
+		m.appInstalling = false
+		m.appInstallResult = &msg
+		m.step = RestoreStepDone
 		return m, nil
 
 	case tea.KeyMsg:
@@ -685,6 +703,9 @@ func (m RestoreWizardModel) handleRunningStep(msg tea.KeyMsg) (tea.Model, tea.Cm
 }
 
 func (m RestoreWizardModel) handleAppsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.appInstalling {
+		return m, nil // ignore input while installing
+	}
 	switch msg.String() {
 	case "up", "k":
 		if m.appCursor > 0 {
@@ -713,7 +734,21 @@ func (m RestoreWizardModel) handleAppsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) 
 			m.installMode = (m.installMode + 1) % 2
 		}
 	case "enter":
-		m.step = RestoreStepDone
+		// Collect selected apps
+		var selected []appInstallItem
+		for _, app := range m.appItems {
+			if app.Selected && !app.AlreadyInstalled {
+				selected = append(selected, app)
+			}
+		}
+		if len(selected) == 0 {
+			m.step = RestoreStepDone
+			return m, nil
+		}
+		m.appInstalling = true
+		backupPath := strings.TrimSpace(m.sourceInput.Value())
+		mode := m.installMode
+		return m, m.runAppInstall(selected, backupPath, mode)
 	case "s":
 		// Skip app install
 		m.step = RestoreStepDone
@@ -871,6 +906,11 @@ func (m RestoreWizardModel) renderAppsStep() string {
 	var sb strings.Builder
 	sb.WriteString("\n  The backup contains an installed apps list.\n")
 
+	if m.appInstalling {
+		sb.WriteString("  " + StyleMuted.Render("Installing apps via winget, please wait...") + "\n")
+		return sb.String()
+	}
+
 	if !m.wingetChecked {
 		sb.WriteString("  " + StyleMuted.Render("Checking winget availability...") + "\n")
 		return sb.String()
@@ -1009,8 +1049,8 @@ func (m RestoreWizardModel) renderDone() string {
 		sb.WriteString(fmt.Sprintf("  Source:    %s (%s)\n", m.sourceMeta.Hostname, m.sourceMeta.Date))
 	}
 
-	if !m.startTime.IsZero() {
-		sb.WriteString(fmt.Sprintf("  Duration:  %s\n", time.Since(m.startTime).Round(time.Second)))
+	if m.finalDuration > 0 {
+		sb.WriteString(fmt.Sprintf("  Duration:  %s\n", m.finalDuration))
 	}
 
 	sb.WriteString("\n  Results:\n")
@@ -1023,6 +1063,29 @@ func (m RestoreWizardModel) renderDone() string {
 		}
 	}
 
+	// App install results
+	if m.appInstallResult != nil {
+		sb.WriteString("\n  App reinstall:\n")
+		if m.appInstallResult.scriptPath != "" {
+			sb.WriteString(fmt.Sprintf("    %s Script saved to: %s\n",
+				StyleSuccess.Render("✔"), StyleMuted.Render(m.appInstallResult.scriptPath)))
+			sb.WriteString(fmt.Sprintf("    %s apps included\n",
+				StyleMuted.Render(fmt.Sprintf("%d", m.appInstallResult.installed))))
+		} else {
+			if m.appInstallResult.installed > 0 {
+				sb.WriteString(fmt.Sprintf("    %s %d apps installed successfully\n",
+					StyleSuccess.Render("✔"), m.appInstallResult.installed))
+			}
+			if m.appInstallResult.failed > 0 {
+				sb.WriteString(fmt.Sprintf("    %s %d apps failed\n",
+					StyleError.Render("✘"), m.appInstallResult.failed))
+			}
+		}
+		for _, e := range m.appInstallResult.errors {
+			sb.WriteString("      • " + StyleError.Render(e) + "\n")
+		}
+	}
+
 	if m.logDir != "" {
 		sb.WriteString(fmt.Sprintf("\n  Logs saved to: %s\n", StyleMuted.Render(m.logDir)))
 	}
@@ -1030,6 +1093,46 @@ func (m RestoreWizardModel) renderDone() string {
 }
 
 // ── Winget helpers ───────────────────────────────────────────────────────────
+
+func (m *RestoreWizardModel) runAppInstall(selected []appInstallItem, backupPath string, mode int) tea.Cmd {
+	return func() tea.Msg {
+		if mode == 0 {
+			// Script mode: generate reinstall.ps1
+			scriptPath := filepath.Join(backupPath, "reinstall.ps1")
+			var sb strings.Builder
+			sb.WriteString("# Auto-generated by MigraThor\n")
+			sb.WriteString("# Run this script in PowerShell to reinstall apps\n\n")
+			for _, app := range selected {
+				sb.WriteString(fmt.Sprintf("Write-Host \"Installing %s...\"\n", app.Name))
+				sb.WriteString(fmt.Sprintf("winget install --id %s --accept-source-agreements --accept-package-agreements\n\n", app.WingetID))
+			}
+			err := os.WriteFile(scriptPath, []byte(sb.String()), 0o644)
+			if err != nil {
+				return appInstallDoneMsg{errors: []string{fmt.Sprintf("write script: %v", err)}}
+			}
+			return appInstallDoneMsg{installed: len(selected), scriptPath: scriptPath}
+		}
+
+		// Execute mode: run winget install for each app
+		var installed, failed int
+		var errors []string
+		for _, app := range selected {
+			out, err := exec.Command("winget.exe", "install",
+				"--id", app.WingetID,
+				"--accept-source-agreements",
+				"--accept-package-agreements",
+				"--silent",
+			).CombinedOutput()
+			if err != nil {
+				failed++
+				errors = append(errors, fmt.Sprintf("%s: %v (%s)", app.Name, err, strings.TrimSpace(string(out))))
+			} else {
+				installed++
+			}
+		}
+		return appInstallDoneMsg{installed: installed, failed: failed, errors: errors}
+	}
+}
 
 func checkWingetAvailable() bool {
 	_, err := exec.LookPath("winget.exe")
