@@ -15,6 +15,8 @@ type RestoreOptions struct {
 	Source           string
 	UserMapping      map[string]string // source username -> target path
 	JobNames         []string
+	SelectedFolders  []string // subset of folders to restore (nil = all)
+	SelectedBrowsers []string // subset of browsers to restore (nil = all)
 	DryRun           bool
 	ConflictStrategy string
 	InstallApps      bool
@@ -30,7 +32,12 @@ type RestoreResult struct {
 }
 
 // RunRestore performs the restore operation.
-func RunRestore(opts RestoreOptions, allJobs []jobs.Job, progressCh chan<- jobs.Progress) (*RestoreResult, error) {
+// If progressCh is non-nil, RunRestore closes it when done.
+func RunRestore(opts RestoreOptions, allJobs []jobs.Job, progressCh chan jobs.Progress) (*RestoreResult, error) {
+	if progressCh != nil {
+		defer close(progressCh)
+	}
+
 	start := time.Now()
 
 	// Load metadata from backup
@@ -58,6 +65,8 @@ func RunRestore(opts RestoreOptions, allJobs []jobs.Job, progressCh chan<- jobs.
 		ConflictStrategy: opts.ConflictStrategy,
 		LogDir:           logDir,
 		ProgressCh:       progressCh,
+		SelectedFolders:  opts.SelectedFolders,
+		SelectedBrowsers: opts.SelectedBrowsers,
 	}
 
 	// Process each user mapping
@@ -66,6 +75,11 @@ func RunRestore(opts RestoreOptions, allJobs []jobs.Job, progressCh chan<- jobs.
 
 		for _, j := range activeJobs {
 			log.Info("running restore job", "job", j.Name())
+
+			// Notify UI that this job is starting
+			if progressCh != nil {
+				progressCh <- jobs.Progress{JobName: j.Name(), Current: 0, Total: 1}
+			}
 
 			result, err := j.Restore(opts.Source, targetUserPath, jobOpts)
 			if err != nil {
@@ -101,7 +115,7 @@ func RunRestore(opts RestoreOptions, allJobs []jobs.Job, progressCh chan<- jobs.
 // ValidateBackup checks that a given directory is a valid backup.
 func ValidateBackup(dir string) (meta.Metadata, error) {
 	if !meta.Exists(dir) {
-		return meta.Metadata{}, fmt.Errorf("no metadata.json found in %s\n\nThis directory does not appear to be a valid migrator backup.", dir)
+		return meta.Metadata{}, fmt.Errorf("no metadata.json found in %s\n\nThis directory does not appear to be a valid MigraThor backup.", dir)
 	}
 	m, err := meta.Load(dir)
 	if err != nil {

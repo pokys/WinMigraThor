@@ -161,7 +161,13 @@ func (j *UserDataJob) Restore(source, userPath string, opts Options) (Result, er
 	var totalBytes int64
 	var totalFiles int
 
-	for _, folder := range StandardFolders {
+	// Determine which folders to restore
+	restoreFolders := StandardFolders
+	if len(opts.SelectedFolders) > 0 {
+		restoreFolders = opts.SelectedFolders
+	}
+
+	for _, folder := range restoreFolders {
 		folderSrc := filepath.Join(src, folder)
 		if _, err := os.Stat(folderSrc); os.IsNotExist(err) {
 			continue
