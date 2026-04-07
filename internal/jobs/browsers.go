@@ -170,9 +170,15 @@ func (j *BrowsersJob) Backup(userPath, target string, opts Options) (Result, err
 		result.Errors = append(result.Errors, "check running browsers: "+err.Error())
 		return result, err
 	} else if len(running) > 0 {
-		result.Status = "error"
-		result.Errors = append(result.Errors, "close these browsers before backup: "+strings.Join(running, ", "))
-		return result, fmt.Errorf("browsers running: %s", strings.Join(running, ", "))
+		terminated, termErr := terminateSelectedBrowsers(browserNamesFromDetected(browsers))
+		if termErr != nil {
+			result.Status = "error"
+			result.Errors = append(result.Errors, "terminate running browsers: "+termErr.Error())
+			return result, termErr
+		}
+		if len(terminated) > 0 {
+			result.Warnings = append(result.Warnings, "terminated running browsers before backup: "+strings.Join(terminated, ", "))
+		}
 	}
 
 	logFile := ""
@@ -281,9 +287,15 @@ func (j *BrowsersJob) Restore(source, userPath string, opts Options) (Result, er
 		result.Errors = append(result.Errors, "check running browsers: "+err.Error())
 		return result, err
 	} else if len(running) > 0 {
-		result.Status = "error"
-		result.Errors = append(result.Errors, "close these browsers before restore: "+strings.Join(running, ", "))
-		return result, fmt.Errorf("browsers running: %s", strings.Join(running, ", "))
+		terminated, termErr := terminateSelectedBrowsers(selectedNames)
+		if termErr != nil {
+			result.Status = "error"
+			result.Errors = append(result.Errors, "terminate running browsers: "+termErr.Error())
+			return result, termErr
+		}
+		if len(terminated) > 0 {
+			result.Warnings = append(result.Warnings, "terminated running browsers before restore: "+strings.Join(terminated, ", "))
+		}
 	}
 
 	for _, e := range entries {
@@ -480,6 +492,33 @@ func browserDisplayName(name string) string {
 	default:
 		return name
 	}
+}
+
+func terminateSelectedBrowsers(browserNames []string) ([]string, error) {
+	var terminated []string
+	seen := make(map[string]bool)
+	for _, browserName := range browserNames {
+		displayName := browserDisplayName(browserName)
+		for _, processName := range browserProcessNames[strings.ToLower(browserName)] {
+			cmd := exec.Command("taskkill.exe", "/IM", processName, "/T", "/F")
+			if out, err := cmd.CombinedOutput(); err != nil {
+				lowerOut := strings.ToLower(string(out))
+				if strings.Contains(lowerOut, "not found") || strings.Contains(lowerOut, "no running instance") {
+					continue
+				}
+				return terminated, fmt.Errorf("%s: %v (%s)", processName, err, strings.TrimSpace(string(out)))
+			}
+			if !seen[displayName] {
+				seen[displayName] = true
+				terminated = append(terminated, displayName)
+			}
+		}
+	}
+
+	if len(terminated) > 0 {
+		time.Sleep(1500 * time.Millisecond)
+	}
+	return terminated, nil
 }
 
 func buildExcludeFlags(dirs []string) []string {
