@@ -37,8 +37,7 @@ func Setup(logDir string) (*Logger, error) {
 		return nil, err
 	}
 
-	mainWriter := io.Writer(mf)
-	mainHandler := slog.NewTextHandler(mainWriter, &slog.HandlerOptions{
+	mainHandler := slog.NewTextHandler(mf, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})
 	errHandler := slog.NewTextHandler(ef, &slog.HandlerOptions{
