@@ -19,6 +19,11 @@ type Browser struct {
 	Profiles   []string // detected profile subdirs
 }
 
+var firefoxConfigFiles = []string{
+	"profiles.ini",
+	"installs.ini",
+}
+
 // BrowsersJob handles browser profile backup/restore.
 type BrowsersJob struct{}
 
@@ -151,6 +156,12 @@ func (j *BrowsersJob) Backup(userPath, target string, opts Options) (Result, err
 	for _, b := range browsers {
 		browserDst := filepath.Join(target, "browsers", strings.ToLower(b.Name))
 
+		if b.Name == "Firefox" && !opts.DryRun {
+			if err := backupFirefoxConfig(b.ProfileDir, browserDst); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("Firefox config: %v", err))
+			}
+		}
+
 		for _, profile := range b.Profiles {
 			src := filepath.Join(b.ProfileDir, profile)
 			dst := filepath.Join(browserDst, profile)
@@ -247,6 +258,13 @@ func (j *BrowsersJob) Restore(source, userPath string, opts Options) (Result, er
 		}
 
 		srcDir := filepath.Join(browsersDir, browserName)
+
+		if strings.EqualFold(browserName, "firefox") && !opts.DryRun {
+			if err := restoreFirefoxConfig(srcDir, dstBase); err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s config: %v", browserName, err))
+			}
+		}
+
 		if opts.DryRun {
 			result.Warnings = append(result.Warnings, fmt.Sprintf("[dry-run] would restore %s → %s", srcDir, dstBase))
 			continue
@@ -275,6 +293,71 @@ func (j *BrowsersJob) Restore(source, userPath string, opts Options) (Result, er
 		opts.ProgressCh <- Progress{JobName: j.Name(), Done: true}
 	}
 	return result, nil
+}
+
+func backupFirefoxConfig(profileDir, browserDst string) error {
+	firefoxRoot := filepath.Clean(filepath.Join(profileDir, ".."))
+	configDst := filepath.Join(browserDst, "_config")
+	if err := os.MkdirAll(configDst, 0o755); err != nil {
+		return err
+	}
+
+	for _, name := range firefoxConfigFiles {
+		src := filepath.Join(firefoxRoot, name)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if err := copyFile(src, filepath.Join(configDst, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func restoreFirefoxConfig(srcDir, profilesDir string) error {
+	configSrc := filepath.Join(srcDir, "_config")
+	if _, err := os.Stat(configSrc); err != nil {
+		return nil
+	}
+
+	firefoxRoot := filepath.Clean(filepath.Join(profilesDir, ".."))
+	if err := os.MkdirAll(firefoxRoot, 0o755); err != nil {
+		return err
+	}
+
+	for _, name := range firefoxConfigFiles {
+		src := filepath.Join(configSrc, name)
+		if _, err := os.Stat(src); err != nil {
+			continue
+		}
+		if err := copyFile(src, filepath.Join(firefoxRoot, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err := out.ReadFrom(in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func buildExcludeFlags(dirs []string) []string {
