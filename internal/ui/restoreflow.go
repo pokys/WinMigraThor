@@ -905,7 +905,36 @@ func (m RestoreWizardModel) renderAppsStep() string {
 		StyleSuccess.Render("✔"), installedCount,
 		StyleFocused.Render("→"), selectedCount))
 
-	for i, app := range m.appItems {
+	// Scrollable app list — show a window of items around the cursor
+	// Reserve lines for: header(~6), footer(~5), border(4) → usable ≈ height-15
+	maxVisible := m.height - 15
+	if maxVisible < 5 {
+		maxVisible = 5
+	}
+	if maxVisible > len(m.appItems) {
+		maxVisible = len(m.appItems)
+	}
+
+	// Calculate scroll window
+	scrollStart := 0
+	if len(m.appItems) > maxVisible {
+		scrollStart = m.appCursor - maxVisible/2
+		if scrollStart < 0 {
+			scrollStart = 0
+		}
+		if scrollStart+maxVisible > len(m.appItems) {
+			scrollStart = len(m.appItems) - maxVisible
+		}
+	}
+	scrollEnd := scrollStart + maxVisible
+
+	// Show scroll indicator at top
+	if scrollStart > 0 {
+		sb.WriteString(fmt.Sprintf("  %s\n", StyleMuted.Render(fmt.Sprintf("  ↑ %d more above", scrollStart))))
+	}
+
+	for i := scrollStart; i < scrollEnd; i++ {
+		app := m.appItems[i]
 		cursor := "  "
 		if i == m.appCursor {
 			cursor = StyleFocused.Render("› ")
@@ -930,6 +959,12 @@ func (m RestoreWizardModel) renderAppsStep() string {
 
 		sb.WriteString(fmt.Sprintf("  %s%s %-30s %s%s%s\n",
 			cursor, check, app.Name, StyleMuted.Render(app.WingetID), matchNote, status))
+	}
+
+	// Show scroll indicator at bottom
+	remaining := len(m.appItems) - scrollEnd
+	if remaining > 0 {
+		sb.WriteString(fmt.Sprintf("  %s\n", StyleMuted.Render(fmt.Sprintf("  ↓ %d more below", remaining))))
 	}
 
 	sb.WriteString("\n  Output mode:\n")
