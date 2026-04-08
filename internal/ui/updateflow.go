@@ -130,8 +130,7 @@ func (m UpdateScreen) View() string {
 
 	case updateStateDone:
 		body = "\n  " + StyleSuccess.Render(IconSuccess+" Aktualizace dokoncena!") + "\n\n"
-		body += "  Novy " + StyleTitle.Render("migrathor.exe") + " je pripraven.\n"
-		body += "  " + StyleMuted.Render("Stara verze ulozena jako migrathor.exe.old") + "\n\n"
+		body += "  Novy " + StyleTitle.Render("migrathor.exe") + " je pripraven.\n\n"
 		body += "  Restartuj aplikaci pro spusteni nove verze.\n"
 		footer = "Enter zpet do menu    q ukoncit"
 
