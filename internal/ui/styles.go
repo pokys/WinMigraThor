@@ -74,17 +74,17 @@ var (
 	StyleProgressEmpty = lipgloss.NewStyle().Foreground(colorMuted)
 
 	// Marker for focused menu item
-	MarkerFocused  = "›"
-	MarkerSelected = "[✔]"
+	MarkerFocused  = ">"
+	MarkerSelected = "[x]"
 	MarkerPartial  = "[~]"
 	MarkerEmpty    = "[ ]"
-	RadioSelected  = "(●)"
+	RadioSelected  = "(*)"
 	RadioEmpty     = "( )"
 
-	IconSuccess = "✔"
-	IconWarning = "⚠"
-	IconError   = "✘"
-	IconWaiting = "…"
+	IconSuccess = "+"
+	IconWarning = "!"
+	IconError   = "x"
+	IconWaiting = "."
 )
 
 // StatusIcon returns the appropriate icon for a status string.

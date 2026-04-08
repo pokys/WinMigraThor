@@ -47,10 +47,13 @@ var jobLabelToName = map[string]string{
 // Layout:
 //   [0] Compression: No
 //   [1] Compression: Yes
+//   [2] Delete unzipped folder (only shown when compress=Yes)
 const (
-	optCompNo    = 0
-	optCompYes   = 1
-	optionsCount = 2
+	optCompNo           = 0
+	optCompYes          = 1
+	optDeleteAfterZip   = 2
+	optionsCountBase    = 2
+	optionsCountWithDel = 3
 )
 
 // ── Model ─────────────────────────────────────────────────────────────────────
@@ -70,8 +73,9 @@ type BackupWizardModel struct {
 	advancedMode bool
 
 	// Step 3: Options
-	optionsCursor int
-	compress      bool
+	optionsCursor  int
+	compress       bool
+	deleteAfterZip bool
 
 	// Step 4: Target
 	targetInput textinput.Model
@@ -400,6 +404,10 @@ func detectedBackupBrowserChildren(userPaths []string) []SelectItem {
 }
 
 func (m BackupWizardModel) handleOptionsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	maxCursor := optionsCountBase - 1
+	if m.compress {
+		maxCursor = optionsCountWithDel - 1
+	}
 	switch msg.String() {
 	case "enter":
 		m.step = BackupStepTarget
@@ -411,16 +419,21 @@ func (m BackupWizardModel) handleOptionsStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			m.optionsCursor--
 		}
 	case "down", "j":
-		if m.optionsCursor < optionsCount-1 {
+		if m.optionsCursor < maxCursor {
 			m.optionsCursor++
 		}
 	case " ", "l", "right":
-		// Select the focused option
 		switch m.optionsCursor {
 		case optCompNo:
 			m.compress = false
+			m.deleteAfterZip = false
+			if m.optionsCursor > optionsCountBase-1 {
+				m.optionsCursor = optionsCountBase - 1
+			}
 		case optCompYes:
 			m.compress = true
+		case optDeleteAfterZip:
+			m.deleteAfterZip = !m.deleteAfterZip
 		}
 	}
 	return m, nil
@@ -581,6 +594,7 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 		SelectedBrowsers: selectedBrowsers,
 		DryRun:           m.dryRun,
 		Compress:         m.compress,
+		DeleteAfterZip:   m.deleteAfterZip,
 		PasswordMode:     "skip",
 		ConflictStrategy: "ask",
 	}
@@ -631,6 +645,9 @@ func (m BackupWizardModel) buildSummary(target string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Target:", target))
 	sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Compress:", map[bool]string{true: "Ano", false: "Ne"}[m.compress]))
+	if m.compress {
+		sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Smazat složku:", map[bool]string{true: "Ano", false: "Ne"}[m.deleteAfterZip]))
+	}
 
 	sb.WriteString("\n  Uživatelé:\n")
 	for _, item := range m.userSelector.Items {
@@ -736,15 +753,21 @@ func (m BackupWizardModel) View() string {
 
 func (m BackupWizardModel) renderOptions() string {
 	type optDef struct {
-		idx     int
-		group   string
-		label   string
+		idx        int
+		group      string
+		label      string
 		isSelected bool
+		isCheckbox bool
 	}
 
 	options := []optDef{
-		{optCompNo, "Komprese:", "Ne — ponechat adresářovou strukturu (rychlejší)", !m.compress},
-		{optCompYes, "", "Ano — vytvořit .zip po záloze", m.compress},
+		{optCompNo, "Komprese:", "Ne — ponechat adresářovou strukturu (rychlejší)", !m.compress, false},
+		{optCompYes, "", "Ano — vytvořit .zip po záloze", m.compress, false},
+	}
+	if m.compress {
+		options = append(options, optDef{
+			optDeleteAfterZip, "Po záloze:", "Smazat nezabalenou složku (ponechat pouze .zip)", m.deleteAfterZip, true,
+		})
 	}
 
 	var sb strings.Builder
@@ -755,17 +778,27 @@ func (m BackupWizardModel) renderOptions() string {
 			sb.WriteString(fmt.Sprintf("\n  %s\n", StyleTitle.Render(opt.group)))
 			lastGroup = opt.group
 		}
-		radio := RadioEmpty
-		if opt.isSelected {
-			radio = StyleSuccess.Render(RadioSelected)
+		var marker string
+		if opt.isCheckbox {
+			if opt.isSelected {
+				marker = StyleSelected.Render(MarkerSelected)
+			} else {
+				marker = MarkerEmpty
+			}
+		} else {
+			if opt.isSelected {
+				marker = StyleSuccess.Render(RadioSelected)
+			} else {
+				marker = RadioEmpty
+			}
 		}
 		label := opt.label
 		if m.optionsCursor == opt.idx {
-			label = StyleFocused.Render("› " + opt.label)
+			label = StyleFocused.Render("> " + opt.label)
 		} else {
 			label = "  " + label
 		}
-		sb.WriteString(fmt.Sprintf("  %s %s\n", radio, label))
+		sb.WriteString(fmt.Sprintf("  %s %s\n", marker, label))
 	}
 	return sb.String()
 }
