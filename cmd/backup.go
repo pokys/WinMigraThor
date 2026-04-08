@@ -24,6 +24,7 @@ type BackupOptions struct {
 	SelectedBrowsers []string // subset of browsers (nil = all)
 	DryRun           bool
 	Compress         bool
+	DeleteAfterZip   bool
 	PasswordMode     string
 	ConflictStrategy string
 }
@@ -157,14 +158,24 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 			if info, err := os.Stat(zipPath); err == nil {
 				zipSize = info.Size()
 			}
-			allResults = append(allResults, jobs.Result{
+			compResult := jobs.Result{
 				JobName:    "compression",
 				Status:     "success",
 				SizeBytes:  zipSize,
 				FilesCount: 1,
 				Warnings:   []string{fmt.Sprintf("ZIP archive created at %s", zipPath)},
 				Duration:   time.Since(start).Round(time.Second).String(),
-			})
+			}
+			if opts.DeleteAfterZip {
+				log.Info("deleting unzipped backup folder", "path", opts.Target)
+				if removeErr := os.RemoveAll(opts.Target); removeErr != nil {
+					log.Error("delete unzipped folder", "error", removeErr)
+					compResult.Warnings = append(compResult.Warnings, fmt.Sprintf("Nelze smazat nezabalenou složku: %s", removeErr))
+				} else {
+					compResult.Warnings = append(compResult.Warnings, fmt.Sprintf("Nezabalená složka smazána: %s", opts.Target))
+				}
+			}
+			allResults = append(allResults, compResult)
 		}
 	}
 
