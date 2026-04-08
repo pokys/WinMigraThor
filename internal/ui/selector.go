@@ -205,7 +205,7 @@ func (s Selector) View() string {
 		// Cursor marker
 		cursorStr := "  "
 		if focused {
-			cursorStr = StyleFocused.Render("› ")
+			cursorStr = StyleFocused.Render(MarkerFocused + " ")
 		}
 
 		// Checkbox
