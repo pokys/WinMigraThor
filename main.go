@@ -81,11 +81,12 @@ func hasFlagDryRun(args []string) bool {
 
 // appModel is the root Bubble Tea model that manages screen routing.
 type appModel struct {
-	screen    ui.Screen
-	mainMenu  ui.MainMenuModel
-	backupWiz ui.BackupWizardModel
+	screen     ui.Screen
+	mainMenu   ui.MainMenuModel
+	backupWiz  ui.BackupWizardModel
 	restoreWiz ui.RestoreWizardModel
 	cleanupSc  ui.CleanupScreen
+	updateSc   ui.UpdateScreen
 	helpActive bool
 	dryRun     bool
 	width      int
@@ -107,6 +108,9 @@ func newAppModel(startScreen ui.Screen, dryRun bool) appModel {
 	if startScreen == ui.ScreenCleanup {
 		m.cleanupSc = ui.NewCleanupScreen()
 	}
+	if startScreen == ui.ScreenUpdate {
+		m.updateSc = ui.NewUpdateScreen()
+	}
 	return m
 }
 
@@ -120,6 +124,8 @@ func (m appModel) Init() tea.Cmd {
 		return m.restoreWiz.Init()
 	case ui.ScreenCleanup:
 		return m.cleanupSc.Init()
+	case ui.ScreenUpdate:
+		return m.updateSc.Init()
 	}
 	return nil
 }
@@ -175,6 +181,13 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cleanupSc = cs
 		}
 		return m, cmd
+
+	case ui.ScreenUpdate:
+		updated, cmd := m.updateSc.Update(msg)
+		if us, ok := updated.(ui.UpdateScreen); ok {
+			m.updateSc = us
+		}
+		return m, cmd
 	}
 	return m, nil
 }
@@ -198,6 +211,9 @@ func (m appModel) navigate(screen ui.Screen) (tea.Model, tea.Cmd) {
 	case ui.ScreenCleanup:
 		m.cleanupSc = ui.NewCleanupScreen()
 		return m, tea.Batch(m.cleanupSc.Init(), sizeCmd)
+	case ui.ScreenUpdate:
+		m.updateSc = ui.NewUpdateScreen()
+		return m, tea.Batch(m.updateSc.Init(), sizeCmd)
 	}
 	return m, nil
 }
@@ -215,6 +231,8 @@ func (m appModel) View() string {
 		return m.restoreWiz.View()
 	case ui.ScreenCleanup:
 		return m.cleanupSc.View()
+	case ui.ScreenUpdate:
+		return m.updateSc.View()
 	case ui.ScreenHelp:
 		return ui.HelpOverlay()
 	}
