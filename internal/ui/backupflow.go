@@ -41,6 +41,7 @@ var jobLabelToName = map[string]string{
 	"Dev environment":     "devenv",
 	"App configs":         "appconfig",
 	"Installed apps":      "apps",
+	"Printers":            "printers",
 }
 
 // ── Options step: flat cursor over all radio options ─────────────────────────
@@ -363,6 +364,7 @@ func buildBackupDataItems(browserChildren []SelectItem, advanced bool) []SelectI
 			SelectItem{Label: "Email", Detail: "Outlook PST, Thunderbird", Selected: true},
 			SelectItem{Label: "WiFi profiles", Detail: "Saved networks + passwords", Selected: true},
 			SelectItem{Label: "VPN connections", Detail: "RAS phonebook (.pbk) files", Selected: true},
+			SelectItem{Label: "Printers", Detail: "Network + local printers (PrintBRM)", Selected: true},
 			SelectItem{Label: "Certificates", Detail: "Personal certificates (valid, with private key)", Selected: true},
 			SelectItem{Label: "Dev environment", Detail: ".ssh, .gitconfig, .docker"},
 			SelectItem{Label: "App configs", Detail: "VS Code settings, AppData"},

@@ -73,6 +73,52 @@ func Compress(srcDir, zipPath string, progressCh chan<- CompressProgress) error 
 	return nil
 }
 
+// Decompress extracts a ZIP archive into destDir.
+func Decompress(zipPath, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("open zip: %w", err)
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		target := filepath.Join(destDir, f.Name)
+
+		// Prevent zip-slip
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) {
+			continue
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(target, 0o755)
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("create dir for %s: %w", f.Name, err)
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			return fmt.Errorf("open zip entry %s: %w", f.Name, err)
+		}
+
+		wf, err := os.Create(target)
+		if err != nil {
+			rc.Close()
+			return fmt.Errorf("create file %s: %w", f.Name, err)
+		}
+
+		_, err = io.Copy(wf, rc)
+		rc.Close()
+		wf.Close()
+		if err != nil {
+			return fmt.Errorf("extract %s: %w", f.Name, err)
+		}
+	}
+	return nil
+}
+
 // EstimateSize returns the total size of all files in a directory.
 func EstimateSize(dir string) (int64, error) {
 	var total int64

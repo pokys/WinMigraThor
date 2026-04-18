@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/pokys/winmigrathor/cmd"
+	"github.com/pokys/winmigrathor/internal/engine"
 	"github.com/pokys/winmigrathor/internal/jobs"
 	"github.com/pokys/winmigrathor/internal/meta"
 )
@@ -21,6 +22,10 @@ import (
 
 type restoreProgressMsg jobs.Progress
 type restoreDoneMsg struct{ result *cmd.RestoreResult }
+type zipExtractDoneMsg struct {
+	extractedDir string
+	err          error
+}
 type wingetCheckMsg struct {
 	available      bool
 	installedApps  map[string]bool // winget ID → installed
@@ -45,6 +50,7 @@ type RestoreWizardModel struct {
 	sourceError string
 	sourceMeta  meta.Metadata
 	validated   bool
+	extracting  bool
 
 	// Step 2: Data selection (with sub-items for folders/browsers)
 	dataSelector Selector
@@ -161,6 +167,23 @@ func (m RestoreWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case zipExtractDoneMsg:
+		m.extracting = false
+		if msg.err != nil {
+			m.sourceError = "Chyba při rozbalení ZIP: " + msg.err.Error()
+			return m, nil
+		}
+		m.sourceInput.SetValue(msg.extractedDir)
+		bm, err := meta.Load(msg.extractedDir)
+		if err != nil {
+			m.sourceError = "ZIP rozbalen, ale neobsahuje platnou zálohu: " + err.Error()
+			return m, nil
+		}
+		m.sourceMeta = bm
+		m.validated = true
+		m.sourceError = ""
+		return m, nil
+
 	case appInstallDoneMsg:
 		m.appInstalling = false
 		m.appInstallResult = &msg
@@ -235,6 +258,9 @@ func (m *RestoreWizardModel) updateProgress(p jobs.Progress) {
 // ── Step handlers ────────────────────────────────────────────────────────────
 
 func (m RestoreWizardModel) handleSourceStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.extracting {
+		return m, nil // block input while extracting
+	}
 	switch msg.String() {
 	case "enter":
 		if m.validated {
@@ -247,7 +273,23 @@ func (m RestoreWizardModel) handleSourceStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 			m.sourceError = "Please enter a backup path"
 			return m, nil
 		}
-		// Validate
+		// ZIP archive — extract first, then validate
+		if strings.HasSuffix(strings.ToLower(path), ".zip") {
+			if _, err := os.Stat(path); err != nil {
+				m.sourceError = "Soubor nenalezen: " + path
+				return m, nil
+			}
+			m.extracting = true
+			m.sourceError = ""
+			destDir := strings.TrimSuffix(path, filepath.Ext(path))
+			return m, func() tea.Msg {
+				if err := engine.Decompress(path, destDir); err != nil {
+					return zipExtractDoneMsg{err: err}
+				}
+				return zipExtractDoneMsg{extractedDir: destDir}
+			}
+		}
+		// Validate folder
 		bm, err := meta.Load(path)
 		if err != nil {
 			m.sourceError = "Not a valid backup: " + err.Error()
@@ -432,6 +474,7 @@ func jobNameToLabel(name string) string {
 		"vpn":          "VPN connections",
 		"credentials":  "Credentials",
 		"certificates": "Certificates",
+		"printers":     "Printers",
 		"devenv":       "Dev environment",
 		"appconfig":    "App configs",
 		"apps":         "Installed apps",
@@ -650,6 +693,7 @@ func labelToJobName(label string) string {
 		"VPN connections": "vpn",
 		"Credentials":     "credentials",
 		"Certificates":    "certificates",
+		"Printers":        "printers",
 		"Dev environment": "devenv",
 		"App configs":     "appconfig",
 		"Installed apps":  "apps",
@@ -879,7 +923,9 @@ func (m RestoreWizardModel) renderSourceStep() string {
 		sb.WriteString("\n\n  " + StyleError.Render("✘ "+m.sourceError))
 	}
 
-	if m.validated {
+	if m.extracting {
+		sb.WriteString("\n\n  " + StyleMuted.Render("Rozbaluji ZIP archiv..."))
+	} else if m.validated {
 		sb.WriteString("\n\n  " + StyleSuccess.Render("✔ Valid backup found") + "\n\n")
 		sb.WriteString(fmt.Sprintf("  Source:    %s\n", m.sourceMeta.Hostname))
 		sb.WriteString(fmt.Sprintf("  Date:      %s\n", m.sourceMeta.Date))
@@ -897,7 +943,7 @@ func (m RestoreWizardModel) renderSourceStep() string {
 		}
 		sb.WriteString("\n  " + StyleMuted.Render("Press Enter to continue, Esc to change path"))
 	} else {
-		sb.WriteString("\n\n  " + StyleMuted.Render("(The folder must contain metadata.json)"))
+		sb.WriteString("\n\n  " + StyleMuted.Render("(Backup folder or ZIP archive)"))
 	}
 	return sb.String()
 }
