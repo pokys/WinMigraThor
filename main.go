@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pokys/winmigrathor/internal/checks"
@@ -250,6 +251,17 @@ func runTUI(startScreen ui.Screen, dryRun bool) {
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Relaunch after self-update (terminal is fully restored at this point)
+	if ui.RestartAfterUpdate {
+		if exe, err := os.Executable(); err == nil {
+			proc := exec.Command(exe)
+			proc.Stdin = os.Stdin
+			proc.Stdout = os.Stdout
+			proc.Stderr = os.Stderr
+			_ = proc.Start()
+		}
 	}
 }
 
