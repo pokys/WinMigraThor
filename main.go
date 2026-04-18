@@ -194,6 +194,12 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateSc = us
 		}
 		return m, cmd
+
+	case ui.ScreenHelp:
+		if _, ok := msg.(tea.KeyMsg); ok {
+			return m.navigate(ui.ScreenMainMenu)
+		}
+		return m, nil
 	}
 	return m, nil
 }
