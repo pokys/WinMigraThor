@@ -8,6 +8,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Version info set by main at startup.
+var (
+	AppVersion   = "dev"
+	AppBuildDate = "unknown"
+)
+
 // Screen represents which main screen is active.
 type Screen int
 
@@ -97,17 +103,33 @@ func (m MainMenuModel) View() string {
 	}
 
 	width := m.width
-	if width < 55 {
-		width = 55
+	if width < 65 {
+		width = 65
 	}
 
-	logo := `
-   ╔╦╗╦╔═╗╦═╗╔═╗╔╦╗╦ ╦╔═╗╦═╗
-   ║║║║║ ╦╠╦╝╠═╣ ║ ╠═╣║ ║╠╦╝
-   ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╩ ╩╚═╝╩╚═  v1.0.0`
+	hammer := "" +
+		"       _/|_\n" +
+		"      |####|\n" +
+		"      |####|\n" +
+		"  ____|    |____\n" +
+		" |   __    __   |\n" +
+		" |__|  |__|  |__|\n" +
+		"       |  |\n" +
+		"       |  |\n" +
+		"       |__|\n"
 
+	logo := "" +
+		"  ╔╦╗╦╔═╗╦═╗╔═╗╔╦╗╦ ╦╔═╗╦═╗\n" +
+		"  ║║║║║ ╦╠╦╝╠═╣ ║ ╠═╣║ ║╠╦╝\n" +
+		"  ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╩ ╩╚═╝╩╚═\n"
+
+	hammerStyled := StyleAccent().Render(hammer)
 	logoStyled := StyleAccent().Render(logo)
-	subtitle := "\n   Windows Migration Tool\n"
+
+	versionLine := fmt.Sprintf("  v%s (%s)", AppVersion, AppBuildDate)
+	subtitle := StyleMuted.Render(versionLine) + "\n\n  Windows Migration Tool\n"
+
+	combined := lipgloss.JoinHorizontal(lipgloss.Center, hammerStyled, "  "+logoStyled)
 
 	var menuLines strings.Builder
 	for i, item := range m.items {
@@ -124,7 +146,7 @@ func (m MainMenuModel) View() string {
 
 	footer := StyleFooter.Width(width - 4).Render("↑/↓ navigate    Enter select    q quit    ? help")
 
-	body := logoStyled + subtitle + "\n" + menuLines.String() + "\n"
+	body := combined + subtitle + "\n" + menuLines.String() + "\n"
 
 	panel := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

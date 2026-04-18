@@ -24,6 +24,9 @@ func main() {
 
 	args := os.Args[1:]
 
+	ui.AppVersion = version
+	ui.AppBuildDate = buildDate
+
 	if shouldRequireAdmin(args) {
 		relaunched, err := checks.EnsureAdminRelaunch(os.Args)
 		if err != nil {
