@@ -28,11 +28,17 @@ The data selection step has **basic** (6 items) and **advanced** (all 11 items) 
 
 ---
 
-## Download
+## Download & run
 
-Grab the latest `migrathor.exe` from the [Releases](https://github.com/pokys/WinMigraThor/releases) page.
+**Quickest way — paste into PowerShell:**
 
-Run as Administrator — the tool auto-relaunches with UAC elevation if needed.
+```powershell
+irm https://raw.githubusercontent.com/pokys/WinMigraThor/main/run.ps1 | iex
+```
+
+This downloads the latest `migrathor.exe` to `%TEMP%` and launches it. A UAC prompt will appear — that's expected.
+
+**Or download manually** from the [Releases](https://github.com/pokys/WinMigraThor/releases) page and run as Administrator.
 
 ---
 
