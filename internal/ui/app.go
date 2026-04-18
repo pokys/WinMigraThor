@@ -107,21 +107,21 @@ func (m MainMenuModel) View() string {
 		width = 65
 	}
 
-	hammer := "" +
-		"  ___________  \n" +
-		" || __   __ || \n" +
+	hammerRaw := "" +
+		"  ___________\n" +
+		" || __   __ ||\n" +
 		" ||_| |_| |_||\n" +
-		"      | |      \n" +
-		"      | |      \n" +
-		"     _| |_     \n" +
-		"    |_____|    \n"
+		"      | |\n" +
+		"      | |\n" +
+		"     _| |_\n" +
+		"    |_____|"
 
 	logo := "" +
 		" ╔╦╗╦╔═╗╦═╗╔═╗╔╦╗╦ ╦╔═╗╦═╗\n" +
 		" ║║║║║ ╦╠╦╝╠═╣ ║ ╠═╣║ ║╠╦╝\n" +
 		" ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╩ ╩╚═╝╩╚═\n"
 
-	hammerStyled := StyleMuted.Render(hammer)
+	hammerStyled := lipgloss.NewStyle().Foreground(colorMuted).Width(15).Render(hammerRaw)
 	logoStyled := StyleAccent().Render(logo)
 
 	versionLine := fmt.Sprintf(" v%s (%s)", AppVersion, AppBuildDate)
