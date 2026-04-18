@@ -16,5 +16,7 @@ func init() {
 		&DevEnvJob{},
 		&AppConfigJob{},
 		&PrintersJob{},
+		&HostsJob{},
+		&PersonalizationJob{},
 	}
 }
