@@ -12,7 +12,7 @@ import (
 
 // Injected at build time via -ldflags.
 var (
-	version   = "0.0.7"
+	version   = "0.0.8"
 	buildDate = "unknown"
 )
 
@@ -57,10 +57,7 @@ func main() {
 	case "restore":
 		runTUI(ui.ScreenRestoreWizard, false)
 
-	case "cleanup":
-		runTUI(ui.ScreenCleanup, false)
-
-	default:
+default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", args[0])
 		printUsage()
 		os.Exit(2)
@@ -94,7 +91,6 @@ type appModel struct {
 	mainMenu   ui.MainMenuModel
 	backupWiz  ui.BackupWizardModel
 	restoreWiz ui.RestoreWizardModel
-	cleanupSc  ui.CleanupScreen
 	updateSc   ui.UpdateScreen
 	helpActive bool
 	dryRun     bool
@@ -114,9 +110,6 @@ func newAppModel(startScreen ui.Screen, dryRun bool) appModel {
 	if startScreen == ui.ScreenRestoreWizard {
 		m.restoreWiz = ui.NewRestoreWizard()
 	}
-	if startScreen == ui.ScreenCleanup {
-		m.cleanupSc = ui.NewCleanupScreen()
-	}
 	if startScreen == ui.ScreenUpdate {
 		m.updateSc = ui.NewUpdateScreen()
 	}
@@ -131,8 +124,6 @@ func (m appModel) Init() tea.Cmd {
 		return m.backupWiz.Init()
 	case ui.ScreenRestoreWizard:
 		return m.restoreWiz.Init()
-	case ui.ScreenCleanup:
-		return m.cleanupSc.Init()
 	case ui.ScreenUpdate:
 		return m.updateSc.Init()
 	}
@@ -184,13 +175,6 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-	case ui.ScreenCleanup:
-		updated, cmd := m.cleanupSc.Update(msg)
-		if cs, ok := updated.(ui.CleanupScreen); ok {
-			m.cleanupSc = cs
-		}
-		return m, cmd
-
 	case ui.ScreenUpdate:
 		updated, cmd := m.updateSc.Update(msg)
 		if us, ok := updated.(ui.UpdateScreen); ok {
@@ -223,9 +207,6 @@ func (m appModel) navigate(screen ui.Screen) (tea.Model, tea.Cmd) {
 	case ui.ScreenRestoreWizard:
 		m.restoreWiz = ui.NewRestoreWizard()
 		return m, tea.Batch(m.restoreWiz.Init(), sizeCmd)
-	case ui.ScreenCleanup:
-		m.cleanupSc = ui.NewCleanupScreen()
-		return m, tea.Batch(m.cleanupSc.Init(), sizeCmd)
 	case ui.ScreenUpdate:
 		m.updateSc = ui.NewUpdateScreen()
 		return m, tea.Batch(m.updateSc.Init(), sizeCmd)
@@ -244,8 +225,6 @@ func (m appModel) View() string {
 		return m.backupWiz.View()
 	case ui.ScreenRestoreWizard:
 		return m.restoreWiz.View()
-	case ui.ScreenCleanup:
-		return m.cleanupSc.View()
 	case ui.ScreenUpdate:
 		return m.updateSc.View()
 	case ui.ScreenHelp:
@@ -282,7 +261,6 @@ Usage:
   migrathor.exe backup              Launch backup wizard
   migrathor.exe backup --dry-run    Show backup plan without executing
   migrathor.exe restore             Launch restore wizard
-  migrathor.exe cleanup             Remove temporary files
   migrathor.exe version             Print version information
   migrathor.exe help                Show this help
 
