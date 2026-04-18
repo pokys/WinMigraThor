@@ -55,7 +55,6 @@ func NewMainMenu() MainMenuModel {
 		items: []MenuItem{
 			{Label: "Backup", Description: "Back up data from this machine", Action: ScreenBackupWizard},
 			{Label: "Restore", Description: "Restore data from a backup", Action: ScreenRestoreWizard},
-			{Label: "Cleanup", Description: "Remove temporary files", Action: ScreenCleanup},
 			{Label: "Update", Description: "Download latest version from GitHub", Action: ScreenUpdate},
 			{Label: "Help", Description: "Show usage and keybindings", Action: ScreenHelp},
 			{Label: "Quit", Description: "Exit MigraThor", Action: -1},
