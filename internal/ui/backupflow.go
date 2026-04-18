@@ -105,8 +105,9 @@ type BackupWizardModel struct {
 
 func NewBackupWizard(dryRun bool) BackupWizardModel {
 	ti := textinput.New()
-	ti.Placeholder = `D:\migration-backup`
+	ti.SetValue(`C:\MigraThor`)
 	ti.Width = 40
+	ti.CursorEnd()
 
 	return BackupWizardModel{
 		step:          BackupStepUsers,
