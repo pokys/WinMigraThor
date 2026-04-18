@@ -176,7 +176,7 @@ func (j *PrintersJob) Restore(source, userPath string, opts Options) (Result, er
 					result.Warnings = append(result.Warnings, strings.TrimSpace(string(out)))
 				}
 			} else {
-				result.Warnings = append(result.Warnings, "PrintBRM restore completed")
+				result.FilesCount++
 			}
 		} else {
 			result.Warnings = append(result.Warnings,
