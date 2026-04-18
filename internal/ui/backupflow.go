@@ -144,7 +144,7 @@ func (m BackupWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scanningUsers = false
 		if msg.Err != nil {
 			m.userSelector.Items = []SelectItem{
-				{Label: "Chyba detekce: " + msg.Err.Error(), Disabled: true},
+				{Label: "Detection error: " + msg.Err.Error(), Disabled: true},
 			}
 			m.userSelector.rebuildFlat()
 			return m, nil
@@ -451,7 +451,7 @@ func (m BackupWizardModel) handleTargetStep(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	case "enter":
 		path := strings.TrimSpace(m.targetInput.Value())
 		if path == "" {
-			m.targetError = "Zadej cestu k cílovému adresáři"
+			m.targetError = "Enter the target directory path"
 			return m, nil
 		}
 		if err := ValidatePath(path); err != nil {
@@ -666,12 +666,12 @@ func filterJobsByName(all []jobs.Job, names []string) []jobs.Job {
 func (m BackupWizardModel) buildSummary(target string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Target:", target))
-	sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Compress:", map[bool]string{true: "Ano", false: "Ne"}[m.compress]))
+	sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Compress:", map[bool]string{true: "Yes", false: "No"}[m.compress]))
 	if m.compress {
-		sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Smazat složku:", map[bool]string{true: "Ano", false: "Ne"}[m.deleteAfterZip]))
+		sb.WriteString(fmt.Sprintf("  %-14s %s\n", "Delete folder:", map[bool]string{true: "Yes", false: "No"}[m.deleteAfterZip]))
 	}
 
-	sb.WriteString("\n  Uživatelé:\n")
+	sb.WriteString("\n  Users:\n")
 	for _, item := range m.userSelector.Items {
 		if item.Selected {
 			sb.WriteString(fmt.Sprintf("    %s %-20s %s\n",
@@ -700,7 +700,7 @@ func (m BackupWizardModel) buildSummary(target string) string {
 	}
 
 	if m.dryRun {
-		sb.WriteString("\n  " + StyleWarning.Render("⚠ DRY-RUN — žádná data nebudou zkopírována"))
+		sb.WriteString("\n  " + StyleWarning.Render("⚠ DRY-RUN — no data will be copied"))
 	}
 	return sb.String()
 }
@@ -716,52 +716,52 @@ func (m BackupWizardModel) View() string {
 	switch m.step {
 	case BackupStepUsers:
 		if m.scanningUsers {
-			body = "\n  " + StyleMuted.Render("Hledám uživatelské profily…") + "\n"
-			footer = "Prosím čekej…"
+			body = "\n  " + StyleMuted.Render("Scanning user profiles...") + "\n"
+			footer = "Please wait..."
 		} else if len(m.userSelector.Items) == 0 {
-			body = "\n  " + StyleError.Render("✘ Žádné profily nenalezeny.") +
-				"\n\n  Ujisti se, že program běží jako správce.\n"
-			footer = "Esc zpět"
+			body = "\n  " + StyleError.Render("✘ No profiles found.") +
+				"\n\n  Make sure the program is running as administrator.\n"
+			footer = "Esc back"
 		} else {
-			body = "\n  Vyber uživatelské profily k zálohování:\n\n" + m.userSelector.View()
-			footer = "Space přepnout  a vše  n nic  Enter dále  Esc zpět"
+			body = "\n  Select user profiles to back up:\n\n" + m.userSelector.View()
+			footer = "Space toggle  a all  n none  Enter next  Esc back"
 		}
 
 	case BackupStepData:
-		modeLabel := StyleMuted.Render("[JEDNODUCHÝ]")
+		modeLabel := StyleMuted.Render("[BASIC]")
 		if m.advancedMode {
-			modeLabel = StyleMuted.Render("[POKROČILÝ]")
+			modeLabel = StyleMuted.Render("[ADVANCED]")
 		}
-		body = "\n  Vyber kategorie dat:  " + modeLabel + "\n\n" + m.dataSelector.View()
-		footer = "Space přepnout  Tab režim  a vše  Enter dále  Esc zpět"
+		body = "\n  Select data categories:  " + modeLabel + "\n\n" + m.dataSelector.View()
+		footer = "Space toggle  Tab mode  a all  Enter next  Esc back"
 
 	case BackupStepOptions:
 		body = m.renderOptions()
-		footer = "↑/↓ navigace    Space / → vybrat    Enter dále    Esc zpět"
+		footer = "↑/↓ navigate    Space / → select    Enter next    Esc back"
 
 	case BackupStepTarget:
-		body = "\n  Zadej cestu k zálohovacímu adresáři:\n\n  " + m.targetInput.View()
+		body = "\n  Enter backup target directory:\n\n  " + m.targetInput.View()
 		if m.targetError != "" {
 			body += "\n\n  " + StyleError.Render("✘ "+m.targetError)
 		}
-		body += "\n\n  " + StyleMuted.Render("Příklad síťové cesty: \\\\server\\share\\backup")
-		footer = "Enter potvrdit    Esc zpět"
+		body += "\n\n  " + StyleMuted.Render("Network path example: \\\\server\\share\\backup")
+		footer = "Enter confirm    Esc back"
 
 	case BackupStepSummary:
 		body = "\n" + m.summaryContent
 		if m.dryRun {
-			footer = "q ukončit (dry-run)"
+			footer = "q quit (dry-run)"
 		} else {
-			footer = "Enter SPUSTIT ZÁLOHU    Esc zpět    q zrušit"
+			footer = "Enter START BACKUP    Esc back    q cancel"
 		}
 
 	case BackupStepRunning:
 		body = m.renderRunning()
-		footer = "Esc zrušit"
+		footer = "Esc cancel"
 
 	case BackupStepDone:
 		body = m.renderDone()
-		footer = "Enter zpět do menu    q ukončit"
+		footer = "Enter back to menu    q quit"
 	}
 
 	w := m.width - 4
@@ -783,12 +783,12 @@ func (m BackupWizardModel) renderOptions() string {
 	}
 
 	options := []optDef{
-		{optCompNo, "Komprese:", "Ne — ponechat adresářovou strukturu (rychlejší)", !m.compress, false},
-		{optCompYes, "", "Ano — vytvořit .zip po záloze", m.compress, false},
+		{optCompNo, "Compression:", "No — keep directory structure (faster)", !m.compress, false},
+		{optCompYes, "", "Yes — create .zip after backup", m.compress, false},
 	}
 	if m.compress {
 		options = append(options, optDef{
-			optDeleteAfterZip, "Po záloze:", "Smazat nezabalenou složku (ponechat pouze .zip)", m.deleteAfterZip, true,
+			optDeleteAfterZip, "After backup:", "Delete uncompressed folder (keep only .zip)", m.deleteAfterZip, true,
 		})
 	}
 
@@ -828,7 +828,7 @@ func (m BackupWizardModel) renderOptions() string {
 func (m BackupWizardModel) renderRunning() string {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("  Celkem: %s  %.0f%%\n\n",
+	sb.WriteString(fmt.Sprintf("  Overall: %s  %.0f%%\n\n",
 		renderBar(m.overallPct, 32), m.overallPct*100))
 
 	for _, row := range m.jobRows {
@@ -837,19 +837,19 @@ func (m BackupWizardModel) renderRunning() string {
 
 	if len(m.warnings) > 0 {
 		sb.WriteString(fmt.Sprintf("\n  %s\n",
-			StyleWarning.Render(fmt.Sprintf("⚠ %d souborů přeskočeno / varování", len(m.warnings)))))
+			StyleWarning.Render(fmt.Sprintf("⚠ %d files skipped / warnings", len(m.warnings)))))
 	}
 
 	elapsed := ""
 	if !m.startTime.IsZero() {
-		elapsed = "  Běží: " + StyleMuted.Render(time.Since(m.startTime).Round(time.Second).String())
+		elapsed = "  Elapsed: " + StyleMuted.Render(time.Since(m.startTime).Round(time.Second).String())
 	}
 	if elapsed != "" {
 		sb.WriteString(elapsed + "\n")
 	}
 
 	if m.cancelConfirm {
-		sb.WriteString("\n  " + StyleWarning.Render("Zrušit zálohu? [Y] Ano    [N] Ne"))
+		sb.WriteString("\n  " + StyleWarning.Render("Cancel backup? [Y] Yes    [N] No"))
 	}
 	return sb.String()
 }
@@ -868,22 +868,22 @@ func (m BackupWizardModel) renderDone() string {
 		}
 	}
 
-	title := StyleSuccess.Render("✔ Záloha dokončena úspěšně")
+	title := StyleSuccess.Render("✔ Backup completed successfully")
 	if hasError {
-		title = StyleError.Render("✘ Záloha dokončena s chybami")
+		title = StyleError.Render("✘ Backup completed with errors")
 	} else if hasWarning {
-		title = StyleWarning.Render("⚠ Záloha dokončena s varováními")
+		title = StyleWarning.Render("⚠ Backup completed with warnings")
 	}
 
 	sb.WriteString("\n  " + title + "\n\n")
 
 	if m.finalDuration > 0 {
-		sb.WriteString(fmt.Sprintf("  Doba:      %s\n", m.finalDuration))
+		sb.WriteString(fmt.Sprintf("  Duration:  %s\n", m.finalDuration))
 	}
-	sb.WriteString("\n  Výsledky:\n")
+	sb.WriteString("\n  Results:\n")
 	for _, r := range m.results {
 		icon := StatusIcon(r.Status)
-		sb.WriteString(fmt.Sprintf("    %s %-20s %s    %d chyb\n",
+		sb.WriteString(fmt.Sprintf("    %s %-20s %s    %d errors\n",
 			icon, r.JobName, FormatSize(r.SizeBytes), len(r.Errors)))
 		for _, w := range r.Warnings {
 			sb.WriteString("      • " + StyleMuted.Render(w) + "\n")
@@ -891,7 +891,7 @@ func (m BackupWizardModel) renderDone() string {
 	}
 
 	if m.logDir != "" {
-		sb.WriteString(fmt.Sprintf("\n  Logy uloženy v: %s\n", StyleMuted.Render(m.logDir)))
+		sb.WriteString(fmt.Sprintf("\n  Logs saved in: %s\n", StyleMuted.Render(m.logDir)))
 	}
 	return sb.String()
 }

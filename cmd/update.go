@@ -33,7 +33,7 @@ func RunUpdate(progressCh chan<- UpdateProgress) {
 
 	exePath, err := os.Executable()
 	if err != nil {
-		send(UpdateProgress{Err: fmt.Errorf("zjištění cesty exe: %w", err)})
+		send(UpdateProgress{Err: fmt.Errorf("resolve exe path: %w", err)})
 		return
 	}
 
@@ -46,13 +46,13 @@ func RunUpdate(progressCh chan<- UpdateProgress) {
 	// Download
 	resp, err := http.Get(UpdateURL) //nolint:gosec // URL is a constant defined above
 	if err != nil {
-		send(UpdateProgress{Err: fmt.Errorf("stažení selhalo: %w", err)})
+		send(UpdateProgress{Err: fmt.Errorf("download failed: %w", err)})
 		return
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		send(UpdateProgress{Err: fmt.Errorf("server vrátil HTTP %d", resp.StatusCode)})
+		send(UpdateProgress{Err: fmt.Errorf("server returned HTTP %d", resp.StatusCode)})
 		return
 	}
 
@@ -60,7 +60,7 @@ func RunUpdate(progressCh chan<- UpdateProgress) {
 
 	f, err := os.Create(tmpPath)
 	if err != nil {
-		send(UpdateProgress{Err: fmt.Errorf("vytvoření dočasného souboru: %w", err)})
+		send(UpdateProgress{Err: fmt.Errorf("create temp file: %w", err)})
 		return
 	}
 
@@ -72,7 +72,7 @@ func RunUpdate(progressCh chan<- UpdateProgress) {
 			if _, writeErr := f.Write(buf[:n]); writeErr != nil {
 				f.Close()
 				os.Remove(tmpPath)
-				send(UpdateProgress{Err: fmt.Errorf("zápis souboru: %w", writeErr)})
+				send(UpdateProgress{Err: fmt.Errorf("write file: %w", writeErr)})
 				return
 			}
 			downloaded += int64(n)
@@ -84,7 +84,7 @@ func RunUpdate(progressCh chan<- UpdateProgress) {
 		if readErr != nil {
 			f.Close()
 			os.Remove(tmpPath)
-			send(UpdateProgress{Err: fmt.Errorf("čtení odpovědi: %w", readErr)})
+			send(UpdateProgress{Err: fmt.Errorf("read response: %w", readErr)})
 			return
 		}
 	}
@@ -94,12 +94,12 @@ func RunUpdate(progressCh chan<- UpdateProgress) {
 	_ = os.Remove(oldPath)
 	if err := os.Rename(exePath, oldPath); err != nil {
 		os.Remove(tmpPath)
-		send(UpdateProgress{Err: fmt.Errorf("přejmenování aktuální verze: %w", err)})
+		send(UpdateProgress{Err: fmt.Errorf("rename current exe: %w", err)})
 		return
 	}
 	if err := os.Rename(tmpPath, exePath); err != nil {
 		_ = os.Rename(oldPath, exePath) // rollback
-		send(UpdateProgress{Err: fmt.Errorf("přejmenování nové verze: %w", err)})
+		send(UpdateProgress{Err: fmt.Errorf("rename new exe: %w", err)})
 		return
 	}
 
