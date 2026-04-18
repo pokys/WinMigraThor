@@ -108,7 +108,7 @@ func (m MainMenuModel) View() string {
 	}
 
 	hammerRaw := "" +
-		"  ___________\n" +
+		" ___________\n" +
 		" || __   __ ||\n" +
 		" ||_| |_| |_||\n" +
 		"      | |\n" +

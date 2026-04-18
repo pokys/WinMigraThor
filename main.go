@@ -12,7 +12,7 @@ import (
 
 // Injected at build time via -ldflags.
 var (
-	version   = "0.0.5"
+	version   = "0.0.6"
 	buildDate = "unknown"
 )
 
