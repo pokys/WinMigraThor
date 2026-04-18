@@ -53,13 +53,15 @@ func Setup(logDir string) (*Logger, error) {
 	}, nil
 }
 
-// Close flushes and closes both underlying log files.
+// Close flushes and closes both underlying log files. Safe to call multiple times.
 func (l *Logger) Close() {
 	if l.mainFile != nil {
 		l.mainFile.Close()
+		l.mainFile = nil
 	}
 	if l.errFile != nil {
 		l.errFile.Close()
+		l.errFile = nil
 	}
 }
 
