@@ -16,6 +16,11 @@ var (
 )
 
 func main() {
+	// Clean up .old file left by a previous self-update
+	if exe, err := os.Executable(); err == nil {
+		os.Remove(exe + ".old")
+	}
+
 	args := os.Args[1:]
 
 	if shouldRequireAdmin(args) {
