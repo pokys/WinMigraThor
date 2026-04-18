@@ -13,13 +13,17 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o migrathor.exe .
 With version metadata:
 ```bash
 GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
-  -ldflags "-X main.version=1.0.0 -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -ldflags "-X main.version=0.0.1 -X main.buildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   -o migrathor.exe .
 ```
 
 The PowerShell script `scripts/build.ps1` wraps this for Windows CI. GitHub Actions builds and releases `migrathor.exe` automatically on push to main (rolling "latest") and on version tags (`v*`).
 
 There are **no tests** in this codebase.
+
+## Versioning
+
+The default version is set in `main.go` (`var version = "0.0.1"`). **Increment the patch version** in `main.go` with every change (e.g. `0.0.1` → `0.0.2` → `0.0.3`). Bump minor for new features, patch for fixes. GitHub Actions overrides this for non-tagged builds with `0.0.0+<sha>`.
 
 ## Architecture
 

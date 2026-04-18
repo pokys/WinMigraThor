@@ -108,28 +108,27 @@ func (m MainMenuModel) View() string {
 	}
 
 	hammer := "" +
-		"       _/|_\n" +
-		"      |####|\n" +
-		"      |####|\n" +
-		"  ____|    |____\n" +
-		" |   __    __   |\n" +
-		" |__|  |__|  |__|\n" +
-		"       |  |\n" +
-		"       |  |\n" +
-		"       |__|\n"
+		"  ___________\n" +
+		" || __   __ ||\n" +
+		" ||_| |_| |_||\n" +
+		"      | |\n" +
+		"      | |\n" +
+		"     _| |_\n" +
+		"    |_____|\n"
 
 	logo := "" +
-		"  ╔╦╗╦╔═╗╦═╗╔═╗╔╦╗╦ ╦╔═╗╦═╗\n" +
-		"  ║║║║║ ╦╠╦╝╠═╣ ║ ╠═╣║ ║╠╦╝\n" +
-		"  ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╩ ╩╚═╝╩╚═\n"
+		" ╔╦╗╦╔═╗╦═╗╔═╗╔╦╗╦ ╦╔═╗╦═╗\n" +
+		" ║║║║║ ╦╠╦╝╠═╣ ║ ╠═╣║ ║╠╦╝\n" +
+		" ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╩ ╩╚═╝╩╚═\n"
 
 	hammerStyled := StyleAccent().Render(hammer)
 	logoStyled := StyleAccent().Render(logo)
 
-	versionLine := fmt.Sprintf("  v%s (%s)", AppVersion, AppBuildDate)
-	subtitle := StyleMuted.Render(versionLine) + "\n\n  Windows Migration Tool\n"
+	versionLine := fmt.Sprintf(" v%s (%s)", AppVersion, AppBuildDate)
 
-	combined := lipgloss.JoinHorizontal(lipgloss.Center, hammerStyled, "  "+logoStyled)
+	logoBlock := logoStyled + StyleMuted.Render(versionLine)
+	combined := lipgloss.JoinHorizontal(lipgloss.Center, hammerStyled, "  "+logoBlock)
+	subtitle := "\n  Windows Migration Tool\n"
 
 	var menuLines strings.Builder
 	for i, item := range m.items {
