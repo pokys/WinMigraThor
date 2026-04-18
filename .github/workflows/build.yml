@@ -34,7 +34,9 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            VERSION="0.0.0+${GITHUB_SHA::8}"
+            # Read version from main.go, append short SHA
+            VERSION=$(grep -oP 'version\s*=\s*"\K[^"]+' main.go || echo "0.0.0")
+            VERSION="${VERSION}+${GITHUB_SHA::8}"
           fi
           go build \
             -ldflags "-s -w -X main.version=${VERSION} -X main.buildDate=${BUILD_DATE}" \
