@@ -149,16 +149,45 @@ func (j *PersonalizationJob) Restore(source, userPath string, opts Options) (Res
 	if settings.Wallpaper != "" {
 		wpSrc := filepath.Join(srcDir, settings.Wallpaper)
 		if fileExists(wpSrc) {
-			// Copy to user's Pictures folder and set as wallpaper
-			wpDst := filepath.Join(userPath, "Pictures", settings.Wallpaper)
-			if data, err := os.ReadFile(wpSrc); err == nil {
-				os.MkdirAll(filepath.Dir(wpDst), 0o755)
-				if err := os.WriteFile(wpDst, data, 0o644); err == nil {
+			wpData, err := os.ReadFile(wpSrc)
+			if err == nil {
+				// Copy to the Windows theme directory so the setting persists
+				// across logoff/logon. Windows caches CachedImage/TranscodedWallpaper
+				// from this location; placing the file there prevents Windows
+				// from reverting to the previous wallpaper.
+				appData := os.Getenv("APPDATA")
+				themeDir := filepath.Join(appData, `Microsoft\Windows\Themes`)
+				os.MkdirAll(themeDir, 0o755)
+
+				wpDst := filepath.Join(themeDir, settings.Wallpaper)
+				if err := os.WriteFile(wpDst, wpData, 0o644); err == nil {
+					// Also overwrite TranscodedWallpaper (Windows reads this on login)
+					transcodedPath := filepath.Join(themeDir, "TranscodedWallpaper")
+					os.WriteFile(transcodedPath, wpData, 0o644)
+
+					// Also copy CachedFiles version (used by some Windows builds)
+					cachedDir := filepath.Join(themeDir, "CachedFiles")
+					os.MkdirAll(cachedDir, 0o755)
+					// Windows names cached files like CachedImage_1920_1080_POS4.jpg
+					// Overwriting TranscodedWallpaper is sufficient, but we also
+					// place the file under its original name for robustness.
+					os.WriteFile(filepath.Join(cachedDir, settings.Wallpaper), wpData, 0o644)
+
+					// Set registry to point at the theme directory copy
 					writeRegString(`HKCU\Control Panel\Desktop`, "WallPaper", wpDst)
-					// Apply wallpaper immediately
+
+					// Set wallpaper style (10=Fill, which is the Windows default)
+					writeRegString(`HKCU\Control Panel\Desktop`, "WallpaperStyle", "10")
+					writeRegString(`HKCU\Control Panel\Desktop`, "TileWallpaper", "0")
+
+					// Apply wallpaper immediately via SystemParametersInfo
 					runPS(fmt.Sprintf(`Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { [DllImport("user32.dll")] public static extern int SystemParametersInfo(int a,int b,string c,int d); }'; [W]::SystemParametersInfo(0x0014,0,'%s',0x01|0x02)`, escapeSingleQuote(wpDst)))
 					result.FilesCount++
+				} else {
+					result.Warnings = append(result.Warnings, "wallpaper write: "+err.Error())
 				}
+			} else {
+				result.Warnings = append(result.Warnings, "wallpaper read: "+err.Error())
 			}
 		}
 	}

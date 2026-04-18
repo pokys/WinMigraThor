@@ -118,31 +118,31 @@ func (m UpdateScreen) View() string {
 		w = 60
 	}
 
-	header := StyleHeader.Render("Aktualizace")
+	header := StyleHeader.Render("Update")
 	var body, footer string
 
 	switch m.state {
 	case updateStateIdle:
-		body = "\n  Stahnout nejnovejsi verzi z GitHubu?\n\n"
+		body = "\n  Download latest version from GitHub?\n\n"
 		body += "  " + StyleMuted.Render("github.com/pokys/WinMigraThor") + "\n\n"
-		body += "  Aktualni exe bude nahrazeno novou verzi.\n"
-		body += "  Po dokonceni se aplikace automaticky restartuje.\n"
-		footer = "Enter spustit    Esc zpet"
+		body += "  The current exe will be replaced with the new version.\n"
+		body += "  The application will restart automatically when done.\n"
+		footer = "Enter start    Esc back"
 
 	case updateStateRunning:
-		body = "\n  Stahuji novou verzi...\n\n"
+		body = "\n  Downloading new version...\n\n"
 		body += m.bar.View()
-		footer = "Prosim cekej..."
+		footer = "Please wait..."
 
 	case updateStateDone:
-		body = "\n  " + StyleSuccess.Render(IconSuccess+" Aktualizace dokoncena!") + "\n\n"
-		body += "  Novy " + StyleTitle.Render("migrathor.exe") + " je pripraven.\n"
-		footer = "Enter restartovat    q ukoncit"
+		body = "\n  " + StyleSuccess.Render(IconSuccess+" Update complete!") + "\n\n"
+		body += "  New " + StyleTitle.Render("migrathor.exe") + " is ready.\n"
+		footer = "Enter restart    q quit"
 
 	case updateStateError:
-		body = "\n  " + StyleError.Render(IconError+" Aktualizace selhala") + "\n\n"
+		body = "\n  " + StyleError.Render(IconError+" Update failed") + "\n\n"
 		body += "  " + StyleMuted.Render(m.errMsg) + "\n"
-		footer = "Enter / Esc zpet"
+		footer = "Enter / Esc back"
 	}
 
 	panel := StyleBorder.Width(w).Render(header + "\n" + body)

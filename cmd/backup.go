@@ -171,9 +171,9 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 				logger.Close() // release log file handles before deleting the folder
 				if removeErr := os.RemoveAll(opts.Target); removeErr != nil {
 					log.Error("delete unzipped folder", "error", removeErr)
-					compResult.Warnings = append(compResult.Warnings, fmt.Sprintf("Nelze smazat nezabalenou složku: %s", removeErr))
+					compResult.Warnings = append(compResult.Warnings, fmt.Sprintf("Cannot delete unzipped folder: %s", removeErr))
 				} else {
-					compResult.Warnings = append(compResult.Warnings, fmt.Sprintf("Nezabalená složka smazána: %s", opts.Target))
+					compResult.Warnings = append(compResult.Warnings, fmt.Sprintf("Unzipped folder deleted: %s", opts.Target))
 				}
 			}
 			allResults = append(allResults, compResult)

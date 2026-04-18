@@ -170,13 +170,13 @@ func (m RestoreWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case zipExtractDoneMsg:
 		m.extracting = false
 		if msg.err != nil {
-			m.sourceError = "Chyba při rozbalení ZIP: " + msg.err.Error()
+			m.sourceError = "ZIP extraction failed: " + msg.err.Error()
 			return m, nil
 		}
 		m.sourceInput.SetValue(msg.extractedDir)
 		bm, err := meta.Load(msg.extractedDir)
 		if err != nil {
-			m.sourceError = "ZIP rozbalen, ale neobsahuje platnou zálohu: " + err.Error()
+			m.sourceError = "ZIP extracted but does not contain a valid backup: " + err.Error()
 			return m, nil
 		}
 		m.sourceMeta = bm
@@ -276,7 +276,7 @@ func (m RestoreWizardModel) handleSourceStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		// ZIP archive — extract first, then validate
 		if strings.HasSuffix(strings.ToLower(path), ".zip") {
 			if _, err := os.Stat(path); err != nil {
-				m.sourceError = "Soubor nenalezen: " + path
+				m.sourceError = "File not found: " + path
 				return m, nil
 			}
 			m.extracting = true
@@ -941,7 +941,7 @@ func (m RestoreWizardModel) renderSourceStep() string {
 	}
 
 	if m.extracting {
-		sb.WriteString("\n\n  " + StyleMuted.Render("Rozbaluji ZIP archiv..."))
+		sb.WriteString("\n\n  " + StyleMuted.Render("Extracting ZIP archive..."))
 	} else if m.validated {
 		sb.WriteString("\n\n  " + StyleSuccess.Render("✔ Valid backup found") + "\n\n")
 		sb.WriteString(fmt.Sprintf("  Source:    %s\n", m.sourceMeta.Hostname))
