@@ -2,12 +2,14 @@ package ui
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pokys/winmigrathor/cmd"
 )
+
+// RestartAfterUpdate is set by the update screen when the user confirms
+// a restart. Checked by main after the TUI exits to relaunch cleanly.
+var RestartAfterUpdate bool
 
 // updateProgressMsg carries a download progress update from the goroutine.
 type updateProgressMsg cmd.UpdateProgress
@@ -56,14 +58,7 @@ func (m UpdateScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				go cmd.RunUpdate(ch)
 				return m, listenUpdateProgress(ch)
 			case updateStateDone:
-				// Relaunch the updated exe and quit
-				if exe, err := os.Executable(); err == nil {
-					proc := exec.Command(exe)
-					proc.Stdin = os.Stdin
-					proc.Stdout = os.Stdout
-					proc.Stderr = os.Stderr
-					_ = proc.Start()
-				}
+				RestartAfterUpdate = true
 				return m, tea.Quit
 			case updateStateError:
 				return m, func() tea.Msg { return NavigateMsg{Screen: ScreenMainMenu} }
