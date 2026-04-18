@@ -666,6 +666,19 @@ func (m *RestoreWizardModel) startRestore() tea.Cmd {
 	m.restoreResultPtr = new(cmd.RestoreResult)
 	resultPtr := m.restoreResultPtr
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				*resultPtr = cmd.RestoreResult{
+					Results: []jobs.Result{{
+						JobName: "system",
+						Status:  "error",
+						Errors:  []string{fmt.Sprintf("unexpected error: %v", r)},
+					}},
+				}
+				defer func() { recover() }()
+				close(ch)
+			}
+		}()
 		result, _ := cmd.RunRestore(opts, allJ, ch)
 		if result != nil {
 			*resultPtr = *result
