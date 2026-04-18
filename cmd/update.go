@@ -103,8 +103,8 @@ func RunUpdate(progressCh chan<- UpdateProgress) {
 		return
 	}
 
-	// Remove the .old backup — update succeeded, no need to keep it
-	_ = os.Remove(oldPath)
+	// Don't remove .old here — it's the running exe on Windows and may be locked.
+	// The next launch will clean it up.
 
 	send(UpdateProgress{Downloaded: downloaded, Total: downloaded, Done: true})
 }

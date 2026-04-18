@@ -2,6 +2,8 @@ package ui
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/pokys/winmigrathor/cmd"
@@ -53,7 +55,17 @@ func (m UpdateScreen) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.progressCh = ch
 				go cmd.RunUpdate(ch)
 				return m, listenUpdateProgress(ch)
-			case updateStateDone, updateStateError:
+			case updateStateDone:
+				// Relaunch the updated exe and quit
+				if exe, err := os.Executable(); err == nil {
+					proc := exec.Command(exe)
+					proc.Stdin = os.Stdin
+					proc.Stdout = os.Stdout
+					proc.Stderr = os.Stderr
+					_ = proc.Start()
+				}
+				return m, tea.Quit
+			case updateStateError:
 				return m, func() tea.Msg { return NavigateMsg{Screen: ScreenMainMenu} }
 			}
 		case "q":
@@ -118,9 +130,8 @@ func (m UpdateScreen) View() string {
 	case updateStateIdle:
 		body = "\n  Stahnout nejnovejsi verzi z GitHubu?\n\n"
 		body += "  " + StyleMuted.Render("github.com/pokys/WinMigraThor") + "\n\n"
-		body += "  Aktualni exe bude prejmenovan na " + StyleMuted.Render("migrathor.exe.old") + "\n"
-		body += "  a nahradi ho nova verze. Po dokonceni\n"
-		body += "  restartuj aplikaci.\n"
+		body += "  Aktualni exe bude nahrazeno novou verzi.\n"
+		body += "  Po dokonceni se aplikace automaticky restartuje.\n"
 		footer = "Enter spustit    Esc zpet"
 
 	case updateStateRunning:
@@ -130,9 +141,8 @@ func (m UpdateScreen) View() string {
 
 	case updateStateDone:
 		body = "\n  " + StyleSuccess.Render(IconSuccess+" Aktualizace dokoncena!") + "\n\n"
-		body += "  Novy " + StyleTitle.Render("migrathor.exe") + " je pripraven.\n\n"
-		body += "  Restartuj aplikaci pro spusteni nove verze.\n"
-		footer = "Enter zpet do menu    q ukoncit"
+		body += "  Novy " + StyleTitle.Render("migrathor.exe") + " je pripraven.\n"
+		footer = "Enter restartovat    q ukoncit"
 
 	case updateStateError:
 		body = "\n  " + StyleError.Render(IconError+" Aktualizace selhala") + "\n\n"
