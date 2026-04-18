@@ -70,6 +70,28 @@ The TUI launches backup/restore in a goroutine. Progress is sent via `chan jobs.
 
 After restore jobs complete, if `apps_winget.json` or `apps.json` exists in the backup, the wizard shows Step 6 (App Reinstall). `loadAppItems()` first tries `apps_winget.json` (only winget-matched apps), then falls back to `apps.json` (all registry apps). Two modes: **script** (generates `reinstall.ps1`) and **execute** (runs `winget install` directly). Apps without a `WingetID` are commented out in script mode and skipped in execute mode.
 
+## TODO — audit backlog (řešit postupně)
+
+### Kritické (zbývající)
+- [ ] Self-update bez checksum — `cmd/update.go`, stažený exe se nijak neověřuje (~50 řádků, střední)
+- [ ] Žádná kontrola místa na disku před zálohou (~60 řádků, složitá, potřeba `GetDiskFreeSpaceEx`)
+- [ ] Cancel neukončí běžící job — Esc zabije TUI ale goroutine běží dál (~100 řádků, složitá, potřeba `context.Context` v Options + jobs)
+
+### Vysoké
+- [ ] ZIP tiše přeskakuje zamčené soubory — `compress.go:37,58`, žádné varování
+- [ ] Robocopy bez timeoutu — `copy.go`, velký soubor na síti → nekonečné čekání
+- [ ] Restore nemá dry-run z UI
+- [ ] Credentials DPAPI omezení — uživatel neví že hesla nebudou fungovat na jiném stroji
+
+### Střední
+- [ ] Cesty s mezerami mohou selhat v robocopy args
+- [ ] Žádná verifikace integrity po záloze (checksum)
+- [ ] Restore user mapping nevaliduje cílového uživatele
+
+### Vyřešené
+- [x] Progress skáče 0→100% — opraveno v 0.0.9
+- [x] Goroutine bez panic recovery — opraveno v 0.0.9
+
 ### Windows-only build tags
 
 All files in `internal/jobs/` that use Windows APIs (`registry`, `netsh`, `robocopy`, `winget`, PowerShell) have `//go:build windows`. Non-Windows stubs live in `*_stub.go` files. The `internal/engine/copy.go` is also Windows-only (robocopy). This means the project compiles on macOS/Linux for syntax checking but cannot run job logic.
