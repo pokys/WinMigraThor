@@ -121,13 +121,13 @@ func (m MainMenuModel) View() string {
 		" ║║║║║ ╦╠╦╝╠═╣ ║ ╠═╣║ ║╠╦╝\n" +
 		" ╩ ╩╩╚═╝╩╚═╩ ╩ ╩ ╩ ╩╚═╝╩╚═\n"
 
-	hammerStyled := StyleAccent().Render(hammer)
+	hammerStyled := StyleMuted.Render(hammer)
 	logoStyled := StyleAccent().Render(logo)
 
 	versionLine := fmt.Sprintf(" v%s (%s)", AppVersion, AppBuildDate)
 
 	logoBlock := logoStyled + StyleMuted.Render(versionLine)
-	combined := lipgloss.JoinHorizontal(lipgloss.Center, hammerStyled, "  "+logoBlock)
+	combined := lipgloss.JoinHorizontal(lipgloss.Center, logoBlock, "  "+hammerStyled)
 	subtitle := "\n  Windows Migration Tool\n"
 
 	var menuLines strings.Builder
