@@ -613,6 +613,21 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 	m.backupResultPtr = new(cmd.BackupResult)
 	resultPtr := m.backupResultPtr
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				*resultPtr = cmd.BackupResult{
+					Results: []jobs.Result{{
+						JobName: "system",
+						Status:  "error",
+						Errors:  []string{fmt.Sprintf("unexpected error: %v", r)},
+					}},
+				}
+				// Channel may already be closed by RunBackup's defer;
+				// safe-close to avoid double-close panic.
+				defer func() { recover() }()
+				close(ch)
+			}
+		}()
 		result, _ := cmd.RunBackup(opts, allJ, ch)
 		if result != nil {
 			*resultPtr = *result

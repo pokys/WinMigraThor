@@ -82,12 +82,13 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 		username := filepath.Base(userPath)
 		log.Info("processing user", "user", username)
 
-		for _, j := range activeJobs {
+		totalJobs := int64(len(activeJobs))
+		for ji, j := range activeJobs {
 			log.Info("running job", "job", j.Name(), "user", username)
 
 			// Notify UI that this job is starting
 			if progressCh != nil {
-				progressCh <- jobs.Progress{JobName: j.Name(), Current: 0, Total: 1}
+				progressCh <- jobs.Progress{JobName: j.Name(), Current: int64(ji), Total: totalJobs}
 			}
 
 			result, err := j.Backup(userPath, opts.Target, jobOpts)

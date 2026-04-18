@@ -73,12 +73,13 @@ func RunRestore(opts RestoreOptions, allJobs []jobs.Job, progressCh chan jobs.Pr
 	for srcUsername, targetUserPath := range opts.UserMapping {
 		log.Info("restoring user", "source_user", srcUsername, "target_path", targetUserPath)
 
-		for _, j := range activeJobs {
+		totalJobs := int64(len(activeJobs))
+		for ji, j := range activeJobs {
 			log.Info("running restore job", "job", j.Name())
 
 			// Notify UI that this job is starting
 			if progressCh != nil {
-				progressCh <- jobs.Progress{JobName: j.Name(), Current: 0, Total: 1}
+				progressCh <- jobs.Progress{JobName: j.Name(), Current: int64(ji), Total: totalJobs}
 			}
 
 			result, err := j.Restore(opts.Source, targetUserPath, jobOpts)
