@@ -191,6 +191,32 @@ func (j *BrowsersJob) Backup(userPath, target string, opts Options) (Result, err
 
 	for _, b := range browsers {
 		browserDst := filepath.Join(target, "browsers", strings.ToLower(b.Name))
+		excludeDirs := append(engine.ExcludeDirs, ExcludeBrowserDirs...)
+
+		// Chrome/Edge: copy the entire User Data folder as one unit so we
+		// capture root-level files like Local State (DPAPI master key, profile
+		// metadata) along with every profile. Firefox keeps its split
+		// (config files at root + per-profile dirs) because the profiles live
+		// in a separate Profiles\ subdirectory.
+		if b.Name == "Chrome" || b.Name == "Edge" {
+			if opts.DryRun {
+				result.Warnings = append(result.Warnings, fmt.Sprintf("[dry-run] would copy %s → %s", b.ProfileDir, browserDst))
+				continue
+			}
+			res, err := engine.Copy(engine.CopyOptions{
+				Source:      b.ProfileDir,
+				Destination: browserDst,
+				LogFile:     logFile,
+				ExtraFlags:  buildExcludeFlags(excludeDirs),
+			})
+			totalBytes += res.BytesCopied
+			totalFiles += res.FilesCopied
+			result.Warnings = append(result.Warnings, res.Warnings...)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", b.Name, err))
+			}
+			continue
+		}
 
 		if b.Name == "Firefox" && !opts.DryRun {
 			if err := backupFirefoxConfig(b.ProfileDir, browserDst); err != nil {
@@ -206,8 +232,6 @@ func (j *BrowsersJob) Backup(userPath, target string, opts Options) (Result, err
 				result.Warnings = append(result.Warnings, fmt.Sprintf("[dry-run] would copy %s → %s", src, dst))
 				continue
 			}
-
-			excludeDirs := append(engine.ExcludeDirs, ExcludeBrowserDirs...)
 
 			res, err := engine.Copy(engine.CopyOptions{
 				Source:      src,

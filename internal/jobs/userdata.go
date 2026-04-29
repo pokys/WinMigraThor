@@ -21,6 +21,11 @@ var StandardFolders = []string{
 	"Music",
 }
 
+// userDataExcludeFiles are file names skipped in user folders so we don't
+// overwrite the OS-localized desktop.ini (which controls the translated folder
+// name shown in Explorer) or pollute the backup with thumbnail caches.
+var userDataExcludeFiles = []string{"desktop.ini", "Thumbs.db", ".DS_Store"}
+
 // UserDataJob backs up and restores standard user folders.
 type UserDataJob struct{}
 
@@ -103,10 +108,11 @@ func (j *UserDataJob) Backup(userPath, target string, opts Options) (Result, err
 		}
 
 		res, err := engine.Copy(engine.CopyOptions{
-			Source:      src,
-			Destination: folderDst,
-			LogFile:     logFile,
-			ProgressCh:  progressCh,
+			Source:       src,
+			Destination:  folderDst,
+			LogFile:      logFile,
+			ProgressCh:   progressCh,
+			ExcludeFiles: userDataExcludeFiles,
 		})
 		if progressCh != nil {
 			close(progressCh)
@@ -182,10 +188,11 @@ func (j *UserDataJob) Restore(source, userPath string, opts Options) (Result, er
 		extraFlags := conflictFlags(opts.ConflictStrategy)
 
 		res, err := engine.Copy(engine.CopyOptions{
-			Source:      folderSrc,
-			Destination: folderDst,
-			LogFile:     logFile,
-			ExtraFlags:  extraFlags,
+			Source:       folderSrc,
+			Destination:  folderDst,
+			LogFile:      logFile,
+			ExtraFlags:   extraFlags,
+			ExcludeFiles: userDataExcludeFiles,
 		})
 
 		totalBytes += res.BytesCopied

@@ -6,37 +6,45 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 
+	"golang.org/x/sys/windows/registry"
 )
 
-// PersonalizationJob backs up and restores Windows personalization settings:
-// wallpaper, theme/colors, dark mode, accent color, keyboard layouts, regional settings.
+// PersonalizationJob backs up and restores low-risk Windows personalization:
+// wallpaper, dark mode and accent color. Locale and keyboard layouts are
+// intentionally not migrated — they depend on installed language packs on the
+// target machine and getting them wrong can break Explorer / input.
 type PersonalizationJob struct{}
 
 func (j *PersonalizationJob) Name() string        { return "personalization" }
-func (j *PersonalizationJob) Description() string { return "Wallpaper, theme, dark mode, keyboard layouts" }
+func (j *PersonalizationJob) Description() string { return "Wallpaper, dark mode, accent color" }
 
 type personalSettings struct {
-	Wallpaper       string `json:"wallpaper"`        // file name (copied separately)
-	DarkMode        int    `json:"dark_mode"`         // 0=dark, 1=light (AppsUseLightTheme)
-	SystemDarkMode  int    `json:"system_dark_mode"`  // 0=dark, 1=light (SystemUsesLightTheme)
-	AccentColor     string `json:"accent_color"`      // DWORD hex
-	ColorPrevalence int    `json:"color_prevalence"`  // show accent on title bars/start
-	Locale          string `json:"locale"`            // e.g. "cs-CZ"
-	KeyboardLayouts string `json:"keyboard_layouts"`  // semicolon-separated list
+	Wallpaper       string `json:"wallpaper"`         // file name (copied separately)
+	WallpaperStyle  string `json:"wallpaper_style"`   // e.g. "10" = Fill
+	TileWallpaper   string `json:"tile_wallpaper"`    // "0" or "1"
+	DarkMode        int    `json:"dark_mode"`         // 1=light, 0=dark (AppsUseLightTheme)
+	SystemDarkMode  int    `json:"system_dark_mode"`  // SystemUsesLightTheme
+	AccentColor     uint32 `json:"accent_color"`      // DWORD ABGR
+	ColorPrevalence int    `json:"color_prevalence"`  // accent on title bars/start
 }
+
+const (
+	spiSetDeskWallpaper = 0x0014
+	spifUpdateIniFile   = 0x01
+	spifSendChange      = 0x02
+)
 
 func (j *PersonalizationJob) Scan(userPath string) (ScanResult, error) {
 	items := []ScanItem{
 		{Label: "Wallpaper", Details: "Desktop background image", Selected: true},
 		{Label: "Theme", Details: "Dark/light mode, accent color", Selected: true},
-		{Label: "Keyboard", Details: "Input languages and layouts", Selected: true},
 	}
-	return ScanResult{Items: items, TotalSizeBytes: 1024 * 100}, nil // rough estimate
+	return ScanResult{Items: items, TotalSizeBytes: 1024 * 100}, nil
 }
 
 func (j *PersonalizationJob) Backup(userPath, target string, opts Options) (Result, error) {
@@ -61,36 +69,43 @@ func (j *PersonalizationJob) Backup(userPath, target string, opts Options) (Resu
 
 	settings := personalSettings{}
 
-	// Wallpaper path
-	wpPath := readRegString(`HKCU\Control Panel\Desktop`, "WallPaper")
-	if wpPath != "" && fileExists(wpPath) {
-		settings.Wallpaper = filepath.Base(wpPath)
-		wpData, err := os.ReadFile(wpPath)
-		if err != nil {
-			result.Warnings = append(result.Warnings, "wallpaper read: "+err.Error())
-		} else if err := os.WriteFile(filepath.Join(dstDir, settings.Wallpaper), wpData, 0o644); err != nil {
-			result.Warnings = append(result.Warnings, "wallpaper write: "+err.Error())
-		} else {
-			result.SizeBytes += int64(len(wpData))
-			result.FilesCount++
+	desktop, err := registry.OpenKey(registry.CURRENT_USER, `Control Panel\Desktop`, registry.QUERY_VALUE)
+	if err == nil {
+		wpPath, _, _ := desktop.GetStringValue("WallPaper")
+		settings.WallpaperStyle, _, _ = desktop.GetStringValue("WallpaperStyle")
+		settings.TileWallpaper, _, _ = desktop.GetStringValue("TileWallpaper")
+		desktop.Close()
+
+		if wpPath != "" && fileExists(wpPath) {
+			settings.Wallpaper = filepath.Base(wpPath)
+			wpData, err := os.ReadFile(wpPath)
+			if err != nil {
+				result.Warnings = append(result.Warnings, "wallpaper read: "+err.Error())
+			} else if err := os.WriteFile(filepath.Join(dstDir, settings.Wallpaper), wpData, 0o644); err != nil {
+				result.Warnings = append(result.Warnings, "wallpaper write: "+err.Error())
+			} else {
+				result.SizeBytes += int64(len(wpData))
+				result.FilesCount++
+			}
 		}
+	} else {
+		result.Warnings = append(result.Warnings, "open Control Panel\\Desktop: "+err.Error())
 	}
 
-	// Dark mode
-	settings.DarkMode = readRegDWORD(`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, "AppsUseLightTheme")
-	settings.SystemDarkMode = readRegDWORD(`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, "SystemUsesLightTheme")
-	settings.ColorPrevalence = readRegDWORD(`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, "ColorPrevalence")
+	if personalize, err := registry.OpenKey(registry.CURRENT_USER, `SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, registry.QUERY_VALUE); err == nil {
+		settings.DarkMode = readDWORD(personalize, "AppsUseLightTheme", -1)
+		settings.SystemDarkMode = readDWORD(personalize, "SystemUsesLightTheme", -1)
+		settings.ColorPrevalence = readDWORD(personalize, "ColorPrevalence", -1)
+		personalize.Close()
+	}
 
-	// Accent color
-	settings.AccentColor = readRegString(`HKCU\SOFTWARE\Microsoft\Windows\DWM`, "AccentColor")
+	if dwm, err := registry.OpenKey(registry.CURRENT_USER, `SOFTWARE\Microsoft\Windows\DWM`, registry.QUERY_VALUE); err == nil {
+		if v, _, err := dwm.GetIntegerValue("AccentColor"); err == nil {
+			settings.AccentColor = uint32(v)
+		}
+		dwm.Close()
+	}
 
-	// Locale
-	settings.Locale = readRegString(`HKCU\Control Panel\International`, "LocaleName")
-
-	// Keyboard layouts
-	settings.KeyboardLayouts = getKeyboardLayouts()
-
-	// Save settings JSON
 	data, _ := json.MarshalIndent(settings, "", "  ")
 	jsonPath := filepath.Join(dstDir, "personalization.json")
 	if err := os.WriteFile(jsonPath, data, 0o644); err != nil {
@@ -145,71 +160,62 @@ func (j *PersonalizationJob) Restore(source, userPath string, opts Options) (Res
 		return result, nil
 	}
 
-	// Restore wallpaper
+	// Wallpaper: copy file into the user's Themes folder, set style hints in
+	// HKCU, then call SystemParametersInfoW to apply it. Windows regenerates
+	// TranscodedWallpaper itself — we don't touch it (writing the wrong format
+	// there leaves the desktop blank on next login).
 	if settings.Wallpaper != "" {
 		wpSrc := filepath.Join(srcDir, settings.Wallpaper)
 		if fileExists(wpSrc) {
 			wpData, err := os.ReadFile(wpSrc)
-			if err == nil {
-				// Copy to the Windows theme directory so the setting persists
-				// across logoff/logon. Windows caches CachedImage/TranscodedWallpaper
-				// from this location; placing the file there prevents Windows
-				// from reverting to the previous wallpaper.
+			if err != nil {
+				result.Warnings = append(result.Warnings, "wallpaper read: "+err.Error())
+			} else {
 				appData := os.Getenv("APPDATA")
 				themeDir := filepath.Join(appData, `Microsoft\Windows\Themes`)
-				os.MkdirAll(themeDir, 0o755)
-
-				wpDst := filepath.Join(themeDir, settings.Wallpaper)
-				if err := os.WriteFile(wpDst, wpData, 0o644); err == nil {
-					// Also overwrite TranscodedWallpaper (Windows reads this on login)
-					transcodedPath := filepath.Join(themeDir, "TranscodedWallpaper")
-					os.WriteFile(transcodedPath, wpData, 0o644)
-
-					// Also copy CachedFiles version (used by some Windows builds)
-					cachedDir := filepath.Join(themeDir, "CachedFiles")
-					os.MkdirAll(cachedDir, 0o755)
-					// Windows names cached files like CachedImage_1920_1080_POS4.jpg
-					// Overwriting TranscodedWallpaper is sufficient, but we also
-					// place the file under its original name for robustness.
-					os.WriteFile(filepath.Join(cachedDir, settings.Wallpaper), wpData, 0o644)
-
-					// Set registry to point at the theme directory copy
-					writeRegString(`HKCU\Control Panel\Desktop`, "WallPaper", wpDst)
-
-					// Set wallpaper style (10=Fill, which is the Windows default)
-					writeRegString(`HKCU\Control Panel\Desktop`, "WallpaperStyle", "10")
-					writeRegString(`HKCU\Control Panel\Desktop`, "TileWallpaper", "0")
-
-					// Apply wallpaper immediately via SystemParametersInfo
-					runPS(fmt.Sprintf(`Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { [DllImport("user32.dll")] public static extern int SystemParametersInfo(int a,int b,string c,int d); }'; [W]::SystemParametersInfo(0x0014,0,'%s',0x01|0x02)`, escapeSingleQuote(wpDst)))
-					result.FilesCount++
-				} else {
-					result.Warnings = append(result.Warnings, "wallpaper write: "+err.Error())
+				if err := os.MkdirAll(themeDir, 0o755); err != nil {
+					result.Warnings = append(result.Warnings, "create theme dir: "+err.Error())
 				}
-			} else {
-				result.Warnings = append(result.Warnings, "wallpaper read: "+err.Error())
+				wpDst := filepath.Join(themeDir, settings.Wallpaper)
+				if err := os.WriteFile(wpDst, wpData, 0o644); err != nil {
+					result.Warnings = append(result.Warnings, "wallpaper write: "+err.Error())
+				} else {
+					style := settings.WallpaperStyle
+					if style == "" {
+						style = "10" // Fill
+					}
+					tile := settings.TileWallpaper
+					if tile == "" {
+						tile = "0"
+					}
+					if err := writeDesktopRegistry(wpDst, style, tile); err != nil {
+						result.Warnings = append(result.Warnings, "wallpaper registry: "+err.Error())
+					}
+					if err := applyWallpaper(wpDst); err != nil {
+						result.Warnings = append(result.Warnings, "apply wallpaper: "+err.Error())
+					}
+					result.FilesCount++
+				}
 			}
+		} else {
+			result.Warnings = append(result.Warnings, "wallpaper file not found in backup: "+settings.Wallpaper)
 		}
 	}
 
-	// Restore dark mode
-	writeRegDWORD(`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, "AppsUseLightTheme", settings.DarkMode)
-	writeRegDWORD(`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, "SystemUsesLightTheme", settings.SystemDarkMode)
-	writeRegDWORD(`HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, "ColorPrevalence", settings.ColorPrevalence)
-
-	// Restore accent color
-	if settings.AccentColor != "" {
-		writeRegString(`HKCU\SOFTWARE\Microsoft\Windows\DWM`, "AccentColor", settings.AccentColor)
+	if personalize, err := registry.OpenKey(registry.CURRENT_USER, `SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize`, registry.SET_VALUE); err == nil {
+		writeDWORD(personalize, "AppsUseLightTheme", settings.DarkMode)
+		writeDWORD(personalize, "SystemUsesLightTheme", settings.SystemDarkMode)
+		writeDWORD(personalize, "ColorPrevalence", settings.ColorPrevalence)
+		personalize.Close()
+	} else {
+		result.Warnings = append(result.Warnings, "open Personalize: "+err.Error())
 	}
 
-	// Restore locale
-	if settings.Locale != "" {
-		runPS(fmt.Sprintf(`Set-WinUserLanguageList -LanguageList '%s' -Force`, escapeSingleQuote(settings.Locale)))
-	}
-
-	// Restore keyboard layouts
-	if settings.KeyboardLayouts != "" {
-		restoreKeyboardLayouts(settings.KeyboardLayouts)
+	if settings.AccentColor != 0 {
+		if dwm, err := registry.OpenKey(registry.CURRENT_USER, `SOFTWARE\Microsoft\Windows\DWM`, registry.SET_VALUE); err == nil {
+			dwm.SetDWordValue("AccentColor", settings.AccentColor)
+			dwm.Close()
+		}
 	}
 
 	result.Duration = time.Since(start).Round(time.Second).String()
@@ -221,70 +227,53 @@ func (j *PersonalizationJob) Restore(source, userPath string, opts Options) (Res
 	return result, nil
 }
 
-// ── Registry helpers ────────────────────────────────────────────────────────
-
-func readRegString(keyPath, valueName string) string {
-	ps := fmt.Sprintf(`(Get-ItemProperty -Path 'Registry::%s' -Name '%s' -ErrorAction SilentlyContinue).'%s'`,
-		keyPath, valueName, valueName)
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-Command", ps).Output()
+func writeDesktopRegistry(wallpaperPath, style, tile string) error {
+	k, err := registry.OpenKey(registry.CURRENT_USER, `Control Panel\Desktop`, registry.SET_VALUE)
 	if err != nil {
-		return ""
+		return err
 	}
-	return strings.TrimSpace(string(out))
-}
-
-func readRegDWORD(keyPath, valueName string) int {
-	s := readRegString(keyPath, valueName)
-	if s == "" {
-		return -1
+	defer k.Close()
+	if err := k.SetStringValue("WallPaper", wallpaperPath); err != nil {
+		return err
 	}
-	var v int
-	fmt.Sscanf(s, "%d", &v)
-	return v
+	if err := k.SetStringValue("WallpaperStyle", style); err != nil {
+		return err
+	}
+	return k.SetStringValue("TileWallpaper", tile)
 }
 
-func writeRegString(keyPath, valueName, value string) {
-	ps := fmt.Sprintf(`Set-ItemProperty -Path 'Registry::%s' -Name '%s' -Value '%s' -Force`,
-		keyPath, valueName, escapeSingleQuote(value))
-	exec.Command("powershell.exe", "-NoProfile", "-Command", ps).Run()
+func applyWallpaper(path string) error {
+	user32 := syscall.NewLazyDLL("user32.dll")
+	proc := user32.NewProc("SystemParametersInfoW")
+	pathPtr, err := syscall.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	ret, _, callErr := proc.Call(
+		uintptr(spiSetDeskWallpaper),
+		0,
+		uintptr(unsafe.Pointer(pathPtr)),
+		uintptr(spifUpdateIniFile|spifSendChange),
+	)
+	if ret == 0 {
+		return fmt.Errorf("SystemParametersInfoW returned 0: %v", callErr)
+	}
+	return nil
 }
 
-func writeRegDWORD(keyPath, valueName string, value int) {
+func readDWORD(k registry.Key, name string, fallback int) int {
+	v, _, err := k.GetIntegerValue(name)
+	if err != nil {
+		return fallback
+	}
+	return int(v)
+}
+
+func writeDWORD(k registry.Key, name string, value int) {
 	if value < 0 {
-		return // skip unknown values
-	}
-	ps := fmt.Sprintf(`Set-ItemProperty -Path 'Registry::%s' -Name '%s' -Value %d -Type DWord -Force`,
-		keyPath, valueName, value)
-	exec.Command("powershell.exe", "-NoProfile", "-Command", ps).Run()
-}
-
-func getKeyboardLayouts() string {
-	out, err := exec.Command("powershell.exe", "-NoProfile", "-Command",
-		`(Get-WinUserLanguageList).LanguageTag -join ';'`).Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-func restoreKeyboardLayouts(layouts string) {
-	tags := strings.Split(layouts, ";")
-	var list []string
-	for _, t := range tags {
-		t = strings.TrimSpace(t)
-		if t != "" {
-			list = append(list, fmt.Sprintf("'%s'", escapeSingleQuote(t)))
-		}
-	}
-	if len(list) == 0 {
 		return
 	}
-	ps := fmt.Sprintf(`Set-WinUserLanguageList -LanguageList %s -Force`, strings.Join(list, ","))
-	exec.Command("powershell.exe", "-NoProfile", "-Command", ps).Run()
-}
-
-func runPS(script string) {
-	exec.Command("powershell.exe", "-NoProfile", "-Command", script).Run()
+	k.SetDWordValue(name, uint32(value))
 }
 
 func fileExists(path string) bool {
