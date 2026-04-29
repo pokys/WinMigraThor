@@ -28,11 +28,12 @@ var ExcludeDirs = []string{
 
 // CopyOptions configures a robocopy operation.
 type CopyOptions struct {
-	Source      string
-	Destination string
-	LogFile     string
-	ExtraFlags  []string
-	ProgressCh  chan<- CopyProgress
+	Source       string
+	Destination  string
+	LogFile      string
+	ExtraFlags   []string
+	ExcludeFiles []string
+	ProgressCh   chan<- CopyProgress
 }
 
 // CopyProgress is sent during a copy operation.
@@ -131,6 +132,12 @@ func buildArgs(opts CopyOptions) []string {
 	if len(ExcludeDirs) > 0 {
 		args = append(args, "/XD")
 		args = append(args, ExcludeDirs...)
+	}
+
+	// Exclude files
+	if len(opts.ExcludeFiles) > 0 {
+		args = append(args, "/XF")
+		args = append(args, opts.ExcludeFiles...)
 	}
 
 	// Extra flags
