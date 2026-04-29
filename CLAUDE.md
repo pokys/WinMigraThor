@@ -81,16 +81,19 @@ After restore jobs complete, if `apps_winget.json` or `apps.json` exists in the 
 - [ ] ZIP tiše přeskakuje zamčené soubory — `compress.go:37,58`, žádné varování
 - [ ] Robocopy bez timeoutu — `copy.go`, velký soubor na síti → nekonečné čekání
 - [ ] Restore nemá dry-run z UI
-- [ ] Credentials DPAPI omezení — uživatel neví že hesla nebudou fungovat na jiném stroji
 
 ### Střední
 - [ ] Cesty s mezerami mohou selhat v robocopy args
 - [ ] Žádná verifikace integrity po záloze (checksum)
 - [ ] Restore user mapping nevaliduje cílového uživatele
+- [ ] Defender false-positive: po každém release submitnout binárku ručně na microsoft.com/wdsi/filesubmission, kategorie „Software developer — false positive". Veřejný free API neexistuje, MDE Plan 2 API je placené. Long-term zvážit code signing cert (~$100–200/rok standard, ~$300/rok EV)
 
 ### Vyřešené
 - [x] Progress skáče 0→100% — opraveno v 0.0.9
 - [x] Goroutine bez panic recovery — opraveno v 0.0.9
+- [x] Wallpaper restore nefunguje + obnova přepisovala desktop.ini (lokalizace složek) — opraveno v 0.0.12
+- [x] Chrome/Edge záloha vynechávala Local State a root soubory — opraveno v 0.0.12 (záloha celé User Data)
+- [x] Credentials DPAPI: Vault/Protect kopírování bylo nefunkční a riskovalo rozbít Credential Manager cílového uživatele — v 0.0.13 přepnuto na info report (`cmdkey /list` jako re-login checklist)
 
 ### Windows-only build tags
 
