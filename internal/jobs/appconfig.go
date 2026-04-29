@@ -6,52 +6,65 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/pokys/winmigrathor/internal/engine"
 )
 
-// AppConfigLocations maps app name to AppData-relative paths.
-var AppConfigLocations = []struct {
-	Name    string
-	RelPath string // relative to APPDATA (Roaming) or LOCALAPPDATA
-	Local   bool   // true = LOCALAPPDATA, false = APPDATA
-}{
-	{"VSCode", `Code\User`, true},
-	{"VSCode extensions", `..\..\Roaming\Code\User\extensions`, true},
-	{"Windows Terminal", `Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState`, true},
-	{"Git Bash", `.config\git`, false},
+// AppConfigItem describes a config directory tied to a specific application.
+// Path supports %APPDATA%, %LOCALAPPDATA% and %USERPROFILE% placeholders that
+// are expanded against the target user's profile (not the current process).
+type AppConfigItem struct {
+	Name string
+	Path string
+}
+
+// AppConfigItems is the list of safe, file-only application configs we
+// migrate. Anything that needs registry, DPAPI, or a service to be running
+// lives in its own job.
+var AppConfigItems = []AppConfigItem{
+	{"VSCode", `%APPDATA%\Code\User`},
+	{"VSCode extensions", `%USERPROFILE%\.vscode\extensions`},
+	{"Windows Terminal", `%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState`},
+	{"Outlook signatures", `%APPDATA%\Microsoft\Signatures`},
+	{"Sticky Notes", `%LOCALAPPDATA%\Packages\Microsoft.MicrosoftStickyNotes_8wekyb3d8bbwe\LocalState`},
+	{"Notepad++", `%APPDATA%\Notepad++`},
+}
+
+// expandAppConfigPath resolves %APPDATA%, %LOCALAPPDATA% and %USERPROFILE%
+// against userPath so the same templates work for backup (current user) and
+// restore (potentially mapped to a different target user).
+func expandAppConfigPath(template, userPath string) string {
+	s := template
+	s = strings.ReplaceAll(s, "%APPDATA%", filepath.Join(userPath, "AppData", "Roaming"))
+	s = strings.ReplaceAll(s, "%LOCALAPPDATA%", filepath.Join(userPath, "AppData", "Local"))
+	s = strings.ReplaceAll(s, "%USERPROFILE%", userPath)
+	return filepath.Clean(s)
 }
 
 // AppConfigJob backs up application configuration files.
 type AppConfigJob struct{}
 
 func (j *AppConfigJob) Name() string        { return "appconfig" }
-func (j *AppConfigJob) Description() string { return "App configs (VS Code, Windows Terminal, ...)" }
+func (j *AppConfigJob) Description() string { return "App configs (VS Code, Outlook signatures, Sticky Notes, Notepad++, ...)" }
 
 func (j *AppConfigJob) Scan(userPath string) (ScanResult, error) {
-	localAppData := filepath.Join(userPath, "AppData", "Local")
-	appData := filepath.Join(userPath, "AppData", "Roaming")
-
 	var items []ScanItem
 	var total int64
 
-	for _, loc := range AppConfigLocations {
-		base := appData
-		if loc.Local {
-			base = localAppData
-		}
-		p := filepath.Join(base, filepath.FromSlash(loc.RelPath))
+	for _, item := range AppConfigItems {
+		p := expandAppConfigPath(item.Path, userPath)
 		if _, err := os.Stat(p); os.IsNotExist(err) {
 			continue
 		}
 		size := folderSize(p)
 		total += size
 		items = append(items, ScanItem{
-			Label:     loc.Name,
+			Label:     item.Name,
 			Path:      p,
 			SizeBytes: size,
-			Selected:  false, // opt-in for advanced users
+			Selected:  false, // opt-in
 		})
 	}
 	return ScanResult{Items: items, TotalSizeBytes: total}, nil
@@ -61,9 +74,6 @@ func (j *AppConfigJob) Backup(userPath, target string, opts Options) (Result, er
 	start := time.Now()
 	result := Result{JobName: j.Name()}
 
-	localAppData := filepath.Join(userPath, "AppData", "Local")
-	appData := filepath.Join(userPath, "AppData", "Roaming")
-
 	logFile := ""
 	if opts.LogDir != "" {
 		logFile = filepath.Join(opts.LogDir, "robocopy-appconfig.log")
@@ -72,20 +82,16 @@ func (j *AppConfigJob) Backup(userPath, target string, opts Options) (Result, er
 	var totalBytes int64
 	var totalFiles int
 
-	for _, loc := range AppConfigLocations {
-		base := appData
-		if loc.Local {
-			base = localAppData
-		}
-		src := filepath.Join(base, filepath.FromSlash(loc.RelPath))
+	for _, item := range AppConfigItems {
+		src := expandAppConfigPath(item.Path, userPath)
 		if _, err := os.Stat(src); os.IsNotExist(err) {
 			continue
 		}
 
-		dst := filepath.Join(target, "appconfig", sanitizeName(loc.Name))
+		dst := filepath.Join(target, "appconfig", sanitizeName(item.Name))
 
 		if opts.DryRun {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("[dry-run] would copy %s", loc.Name))
+			result.Warnings = append(result.Warnings, fmt.Sprintf("[dry-run] would copy %s", item.Name))
 			continue
 		}
 
@@ -98,7 +104,7 @@ func (j *AppConfigJob) Backup(userPath, target string, opts Options) (Result, er
 		totalFiles += res.FilesCopied
 		result.Warnings = append(result.Warnings, res.Warnings...)
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", loc.Name, err))
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", item.Name, err))
 		}
 	}
 
@@ -123,9 +129,6 @@ func (j *AppConfigJob) Restore(source, userPath string, opts Options) (Result, e
 		return result, nil
 	}
 
-	localAppData := filepath.Join(userPath, "AppData", "Local")
-	appData := filepath.Join(userPath, "AppData", "Roaming")
-
 	logFile := ""
 	if opts.LogDir != "" {
 		logFile = filepath.Join(opts.LogDir, "robocopy-appconfig-restore.log")
@@ -134,25 +137,21 @@ func (j *AppConfigJob) Restore(source, userPath string, opts Options) (Result, e
 	var totalBytes int64
 	var totalFiles int
 
-	for _, loc := range AppConfigLocations {
-		srcDir := filepath.Join(appConfigSrc, sanitizeName(loc.Name))
+	for _, item := range AppConfigItems {
+		srcDir := filepath.Join(appConfigSrc, sanitizeName(item.Name))
 		if _, err := os.Stat(srcDir); os.IsNotExist(err) {
 			continue
 		}
 
-		base := appData
-		if loc.Local {
-			base = localAppData
-		}
-		dst := filepath.Join(base, filepath.FromSlash(loc.RelPath))
+		dst := expandAppConfigPath(item.Path, userPath)
 
 		if opts.DryRun {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("[dry-run] would restore %s", loc.Name))
+			result.Warnings = append(result.Warnings, fmt.Sprintf("[dry-run] would restore %s", item.Name))
 			continue
 		}
 
 		if err := os.MkdirAll(dst, 0o755); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("create %s dir: %v", loc.Name, err))
+			result.Errors = append(result.Errors, fmt.Sprintf("create %s dir: %v", item.Name, err))
 			continue
 		}
 
@@ -166,7 +165,7 @@ func (j *AppConfigJob) Restore(source, userPath string, opts Options) (Result, e
 		totalFiles += res.FilesCopied
 		result.Warnings = append(result.Warnings, res.Warnings...)
 		if err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", loc.Name, err))
+			result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", item.Name, err))
 		}
 	}
 
