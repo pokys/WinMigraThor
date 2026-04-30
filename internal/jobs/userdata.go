@@ -108,6 +108,7 @@ func (j *UserDataJob) Backup(userPath, target string, opts Options) (Result, err
 		}
 
 		res, err := engine.Copy(engine.CopyOptions{
+			Ctx:          opts.Ctx,
 			Source:       src,
 			Destination:  folderDst,
 			LogFile:      logFile,
@@ -188,6 +189,7 @@ func (j *UserDataJob) Restore(source, userPath string, opts Options) (Result, er
 		extraFlags := conflictFlags(opts.ConflictStrategy)
 
 		res, err := engine.Copy(engine.CopyOptions{
+			Ctx:          opts.Ctx,
 			Source:       folderSrc,
 			Destination:  folderDst,
 			LogFile:      logFile,

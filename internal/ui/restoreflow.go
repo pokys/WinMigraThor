@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -66,9 +67,12 @@ type RestoreWizardModel struct {
 	jobRows          []JobProgressRow
 	overallPct       float64
 	cancelConfirm    bool
+	cancelling       bool
+	cancelFn         context.CancelFunc
 	progressCh       chan jobs.Progress
 	restoreResultPtr *cmd.RestoreResult
 	startTime        time.Time
+	cancelled        bool
 
 	// Step 6: App reinstall
 	appItems         []appInstallItem
@@ -132,19 +136,36 @@ func (m RestoreWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.startTime.IsZero() {
 			m.finalDuration = time.Since(m.startTime).Round(time.Second)
 		}
-		if m.restoreResultPtr != nil && len(m.restoreResultPtr.Results) > 0 {
-			m.results = m.restoreResultPtr.Results
-			m.logDir = m.restoreResultPtr.LogDir
+		if m.restoreResultPtr != nil {
+			if len(m.restoreResultPtr.Results) > 0 {
+				m.results = m.restoreResultPtr.Results
+				m.logDir = m.restoreResultPtr.LogDir
+			}
+			m.cancelled = m.restoreResultPtr.Cancelled
 		}
-		// Mark all rows done
+		// Mark all rows done — but if cancelled, don't pretend incomplete
+		// rows are finished.
 		for i := range m.jobRows {
-			if m.jobRows[i].Bar.Status == "running" || m.jobRows[i].Bar.Status == "waiting" {
-				m.jobRows[i].Bar.Status = "done"
-				m.jobRows[i].Bar.Percent = 1.0
+			switch m.jobRows[i].Bar.Status {
+			case "running":
+				if m.cancelled {
+					m.jobRows[i].Bar.Status = "cancelled"
+				} else {
+					m.jobRows[i].Bar.Status = "done"
+					m.jobRows[i].Bar.Percent = 1.0
+				}
+			case "waiting":
+				if m.cancelled {
+					m.jobRows[i].Bar.Status = "skipped"
+				} else {
+					m.jobRows[i].Bar.Status = "done"
+					m.jobRows[i].Bar.Percent = 1.0
+				}
 			}
 		}
-		// Check if we have app data — if so go to apps step, otherwise done
-		if m.hasAppData() {
+		// Skip the app reinstall step on cancellation — the restore is
+		// incomplete and queueing further work would mask that.
+		if !m.cancelled && m.hasAppData() {
 			m.step = RestoreStepApps
 			return m, m.checkWingetAndLoadApps()
 		}
@@ -663,9 +684,12 @@ func (m *RestoreWizardModel) startRestore() tea.Cmd {
 		SelectedBrowsers: selectedBrowsers,
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelFn = cancel
 	m.restoreResultPtr = new(cmd.RestoreResult)
 	resultPtr := m.restoreResultPtr
 	go func() {
+		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
 				*resultPtr = cmd.RestoreResult{
@@ -679,7 +703,7 @@ func (m *RestoreWizardModel) startRestore() tea.Cmd {
 				close(ch)
 			}
 		}()
-		result, _ := cmd.RunRestore(opts, allJ, ch)
+		result, _ := cmd.RunRestore(ctx, opts, allJ, ch)
 		if result != nil {
 			*resultPtr = *result
 		}
@@ -801,12 +825,19 @@ func (m *RestoreWizardModel) checkWingetAndLoadApps() tea.Cmd {
 }
 
 func (m RestoreWizardModel) handleRunningStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.cancelling {
+		return m, nil
+	}
 	switch msg.String() {
 	case "esc":
 		m.cancelConfirm = !m.cancelConfirm
 	case "y":
 		if m.cancelConfirm {
-			return m, tea.Quit
+			m.cancelling = true
+			m.cancelConfirm = false
+			if m.cancelFn != nil {
+				m.cancelFn()
+			}
 		}
 	case "n":
 		m.cancelConfirm = false
@@ -1016,7 +1047,9 @@ func (m RestoreWizardModel) renderRunning() string {
 		sb.WriteString(elapsed + "\n")
 	}
 
-	if m.cancelConfirm {
+	if m.cancelling {
+		sb.WriteString("\n\n  " + StyleWarning.Render("Cancelling… waiting for current operation to stop"))
+	} else if m.cancelConfirm {
 		sb.WriteString("\n\n  " + StyleWarning.Render("Cancel restore? [Y] Yes    [N] No"))
 	}
 	return sb.String()
@@ -1172,7 +1205,9 @@ func (m RestoreWizardModel) renderDone() string {
 	}
 
 	title := StyleSuccess.Render("✔ Restore completed successfully")
-	if hasError {
+	if m.cancelled {
+		title = StyleWarning.Render("⚠ Restore cancelled — partial state on disk; rerun to finish")
+	} else if hasError {
 		title = StyleError.Render("✘ Restore completed with errors")
 	} else if hasWarning {
 		title = StyleWarning.Render("⚠ Restore completed with warnings")

@@ -4,6 +4,7 @@ package engine
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,6 +29,7 @@ var ExcludeDirs = []string{
 
 // CopyOptions configures a robocopy operation.
 type CopyOptions struct {
+	Ctx          context.Context // optional; nil means context.Background()
 	Source       string
 	Destination  string
 	LogFile      string
@@ -64,7 +66,11 @@ func Copy(opts CopyOptions) (RobocopyResult, error) {
 	}
 
 	args := buildArgs(opts)
-	cmd := exec.Command("robocopy.exe", args...)
+	ctx := opts.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd := exec.CommandContext(ctx, "robocopy.exe", args...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -85,6 +91,12 @@ func Copy(opts CopyOptions) (RobocopyResult, error) {
 
 	err = cmd.Wait()
 	result.Duration = time.Since(start)
+
+	// Surface cancellation as a clean error — robocopy was killed by the
+	// context's signal, so any non-zero exit code below is meaningless.
+	if ctx.Err() != nil {
+		return result, ctx.Err()
+	}
 
 	// Robocopy exit codes: 0-7 = success/informational, >=8 = error
 	exitCode := 0

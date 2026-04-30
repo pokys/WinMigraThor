@@ -31,6 +31,7 @@ type Metadata struct {
 	TotalSize int64     `json:"total_size_bytes"`
 	Duration  string    `json:"duration"`
 	Profile   string    `json:"profile"`
+	Cancelled bool      `json:"cancelled,omitempty"`
 }
 
 // New constructs a Metadata with the current date and the provided system info.

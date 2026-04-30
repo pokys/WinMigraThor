@@ -1,7 +1,10 @@
 package jobs
 
+import "context"
+
 // Options holds per-run configuration passed to jobs.
 type Options struct {
+	Ctx              context.Context // optional; nil means context.Background()
 	DryRun           bool
 	PasswordMode     string // skip, assisted, experimental
 	ConflictStrategy string // ask, overwrite, skip, rename
