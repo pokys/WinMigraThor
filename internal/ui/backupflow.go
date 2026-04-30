@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/pokys/winmigrathor/cmd"
+	"github.com/pokys/winmigrathor/internal/engine"
 	"github.com/pokys/winmigrathor/internal/jobs"
 	"github.com/pokys/winmigrathor/internal/users"
 )
@@ -92,6 +94,8 @@ type BackupWizardModel struct {
 	overallPct      float64
 	warnings        []string
 	cancelConfirm   bool
+	cancelling      bool
+	cancelFn        context.CancelFunc
 	progressCh      chan jobs.Progress
 	backupResultPtr *cmd.BackupResult
 	startTime       time.Time
@@ -101,6 +105,7 @@ type BackupWizardModel struct {
 	logDir        string
 	dryRun        bool
 	finalDuration time.Duration
+	cancelled     bool
 }
 
 func NewBackupWizard(dryRun bool) BackupWizardModel {
@@ -187,18 +192,36 @@ func (m BackupWizardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// RunBackup closes the channel after returning, so the result
 		// pointer has been populated by the goroutine at this point.
-		if m.backupResultPtr != nil && len(m.backupResultPtr.Results) > 0 {
-			m.results = m.backupResultPtr.Results
-			m.logDir = m.backupResultPtr.LogDir
+		if m.backupResultPtr != nil {
+			if len(m.backupResultPtr.Results) > 0 {
+				m.results = m.backupResultPtr.Results
+				m.logDir = m.backupResultPtr.LogDir
+			}
+			m.cancelled = m.backupResultPtr.Cancelled
 		}
-		// Mark all rows done and update overall progress
+		// Mark all rows done and update overall progress, but leave any
+		// row that didn't even start as "skipped" when we were cancelled.
 		for i := range m.jobRows {
-			if m.jobRows[i].Bar.Status == "running" || m.jobRows[i].Bar.Status == "waiting" {
-				m.jobRows[i].Bar.Status = "done"
-				m.jobRows[i].Bar.Percent = 1.0
+			switch m.jobRows[i].Bar.Status {
+			case "running":
+				if m.cancelled {
+					m.jobRows[i].Bar.Status = "cancelled"
+				} else {
+					m.jobRows[i].Bar.Status = "done"
+					m.jobRows[i].Bar.Percent = 1.0
+				}
+			case "waiting":
+				if m.cancelled {
+					m.jobRows[i].Bar.Status = "skipped"
+				} else {
+					m.jobRows[i].Bar.Status = "done"
+					m.jobRows[i].Bar.Percent = 1.0
+				}
 			}
 		}
-		m.overallPct = 1.0
+		if !m.cancelled {
+			m.overallPct = 1.0
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -477,6 +500,16 @@ func (m BackupWizardModel) handleSummaryStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 		if m.dryRun {
 			return m, tea.Quit
 		}
+		// Disk space sanity check before we start writing anything.
+		// We use a conservative estimate (data selection × user count + 20%
+		// margin, with a 100 MB floor) so a backup doesn't fail halfway
+		// through with the target volume full.
+		target := strings.TrimSpace(m.targetInput.Value())
+		if errMsg := m.checkDiskSpace(target); errMsg != "" {
+			m.targetError = errMsg
+			m.step = BackupStepTarget
+			return m, nil
+		}
 		m.step = BackupStepRunning
 		m.startTime = time.Now()
 		return m, m.startBackup()
@@ -488,13 +521,75 @@ func (m BackupWizardModel) handleSummaryStep(msg tea.KeyMsg) (tea.Model, tea.Cmd
 	return m, nil
 }
 
+// estimateBackupSize sums SizeBytes from the data selector for the selected
+// items (using selected children when a parent has them) and multiplies by
+// the number of selected user profiles. It is intentionally a ballpark — the
+// caller adds a safety margin on top.
+func (m BackupWizardModel) estimateBackupSize() int64 {
+	var perUser int64
+	for _, item := range m.dataSelector.Items {
+		if len(item.Children) > 0 {
+			for _, c := range item.Children {
+				if c.Selected {
+					perUser += c.SizeBytes
+				}
+			}
+		} else if item.Selected {
+			perUser += item.SizeBytes
+		}
+	}
+	users := 0
+	for _, u := range m.userSelector.Items {
+		if u.Selected {
+			users++
+		}
+	}
+	if users == 0 {
+		users = 1
+	}
+	return perUser * int64(users)
+}
+
+// checkDiskSpace returns a human-readable error string if the target volume
+// likely cannot fit the backup. Empty string means "looks OK". A failure to
+// query the volume (e.g. unreachable network share) is surfaced too — the
+// user needs to know we couldn't validate.
+func (m BackupWizardModel) checkDiskSpace(target string) string {
+	estimate := m.estimateBackupSize()
+	const safetyFloor = 100 * 1024 * 1024 // 100 MB
+	required := estimate + estimate/5     // +20% margin
+	if required < safetyFloor {
+		required = safetyFloor
+	}
+
+	free, err := engine.FreeBytesOnVolume(target)
+	if err != nil {
+		return fmt.Sprintf("Cannot check free space on %s: %v", target, err)
+	}
+	if free < required {
+		return fmt.Sprintf(
+			"Not enough free space on target.\nEstimated need: %s (incl. 20%% margin)\nAvailable:        %s\nFree up space or pick a different target.",
+			FormatSize(required), FormatSize(free))
+	}
+	return ""
+}
+
 func (m BackupWizardModel) handleRunningStep(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Once cancellation is in flight, ignore further key input — we wait for
+	// the goroutine to finish (channel close → backupDoneMsg).
+	if m.cancelling {
+		return m, nil
+	}
 	switch msg.String() {
 	case "esc":
 		m.cancelConfirm = !m.cancelConfirm
 	case "y":
 		if m.cancelConfirm {
-			return m, tea.Quit
+			m.cancelling = true
+			m.cancelConfirm = false
+			if m.cancelFn != nil {
+				m.cancelFn()
+			}
 		}
 	case "n":
 		m.cancelConfirm = false
@@ -610,9 +705,12 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 	// We store the result pointer atomically — by the time the progress
 	// channel closes (triggering backupDoneMsg), RunBackup has returned
 	// and the pointer is set.
+	ctx, cancel := context.WithCancel(context.Background())
+	m.cancelFn = cancel
 	m.backupResultPtr = new(cmd.BackupResult)
 	resultPtr := m.backupResultPtr
 	go func() {
+		defer cancel()
 		defer func() {
 			if r := recover(); r != nil {
 				*resultPtr = cmd.BackupResult{
@@ -628,7 +726,7 @@ func (m *BackupWizardModel) startBackup() tea.Cmd {
 				close(ch)
 			}
 		}()
-		result, _ := cmd.RunBackup(opts, allJ, ch)
+		result, _ := cmd.RunBackup(ctx, opts, allJ, ch)
 		if result != nil {
 			*resultPtr = *result
 		}
@@ -848,7 +946,9 @@ func (m BackupWizardModel) renderRunning() string {
 		sb.WriteString(elapsed + "\n")
 	}
 
-	if m.cancelConfirm {
+	if m.cancelling {
+		sb.WriteString("\n  " + StyleWarning.Render("Cancelling… waiting for current operation to stop"))
+	} else if m.cancelConfirm {
 		sb.WriteString("\n  " + StyleWarning.Render("Cancel backup? [Y] Yes    [N] No"))
 	}
 	return sb.String()
@@ -869,7 +969,9 @@ func (m BackupWizardModel) renderDone() string {
 	}
 
 	title := StyleSuccess.Render("✔ Backup completed successfully")
-	if hasError {
+	if m.cancelled {
+		title = StyleWarning.Render("⚠ Backup cancelled — partial data on disk; metadata.json marks it as incomplete")
+	} else if hasError {
 		title = StyleError.Render("✘ Backup completed with errors")
 	} else if hasWarning {
 		title = StyleWarning.Render("⚠ Backup completed with warnings")

@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -31,17 +32,22 @@ type BackupOptions struct {
 
 // BackupResult holds the aggregate result.
 type BackupResult struct {
-	Results  []jobs.Result
-	Duration time.Duration
-	LogDir   string
-	Error    error
+	Results   []jobs.Result
+	Duration  time.Duration
+	LogDir    string
+	Cancelled bool
+	Error     error
 }
 
 // RunBackup performs the backup operation.
 // The caller is responsible for creating progressCh; RunBackup closes it when done.
-func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Progress) (*BackupResult, error) {
+// If ctx is nil, context.Background() is used.
+func RunBackup(ctx context.Context, opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Progress) (*BackupResult, error) {
 	if progressCh != nil {
 		defer close(progressCh)
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	start := time.Now()
@@ -68,6 +74,7 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 	activeJobs := filterJobs(allJobs, opts.JobNames)
 
 	jobOpts := jobs.Options{
+		Ctx:              ctx,
 		DryRun:           opts.DryRun,
 		PasswordMode:     opts.PasswordMode,
 		ConflictStrategy: opts.ConflictStrategy,
@@ -78,12 +85,19 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 		SelectedBrowsers: opts.SelectedBrowsers,
 	}
 
+	cancelled := false
+userLoop:
 	for _, userPath := range opts.Users {
 		username := filepath.Base(userPath)
 		log.Info("processing user", "user", username)
 
 		totalJobs := int64(len(activeJobs))
 		for ji, j := range activeJobs {
+			if ctx.Err() != nil {
+				cancelled = true
+				log.Info("cancelled, stopping job loop", "before", j.Name())
+				break userLoop
+			}
 			log.Info("running job", "job", j.Name(), "user", username)
 
 			// Notify UI that this job is starting
@@ -124,6 +138,7 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 
 	duration := time.Since(start)
 	m.Duration = duration.Round(time.Second).String()
+	m.Cancelled = cancelled
 
 	// Calculate total size
 	for _, r := range allResults {
@@ -143,7 +158,7 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 		log.Error("save config", "error", err)
 	}
 
-	if opts.Compress {
+	if opts.Compress && !cancelled {
 		zipPath := strings.TrimRight(opts.Target, `\/`) + ".zip"
 		log.Info("compressing backup", "source", opts.Target, "zip", zipPath)
 		if err := engine.Compress(opts.Target, zipPath, nil); err != nil {
@@ -180,12 +195,17 @@ func RunBackup(opts BackupOptions, allJobs []jobs.Job, progressCh chan jobs.Prog
 		}
 	}
 
-	log.Info("backup complete", "duration", duration, "total_size", m.TotalSize)
+	if cancelled {
+		log.Info("backup cancelled", "duration", duration)
+	} else {
+		log.Info("backup complete", "duration", duration, "total_size", m.TotalSize)
+	}
 
 	return &BackupResult{
-		Results:  allResults,
-		Duration: duration,
-		LogDir:   logDir,
+		Results:   allResults,
+		Duration:  duration,
+		LogDir:    logDir,
+		Cancelled: cancelled,
 	}, nil
 }
 

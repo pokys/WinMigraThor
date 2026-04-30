@@ -144,6 +144,7 @@ func (j *EmailJob) Backup(userPath, target string, opts Options) (Result, error)
 			result.Warnings = append(result.Warnings, "[dry-run] would copy Thunderbird profiles")
 		} else {
 			res, err := engine.Copy(engine.CopyOptions{
+				Ctx:         opts.Ctx,
 				Source:      tbDir,
 				Destination: tbDst,
 				LogFile:     logFile,
@@ -195,6 +196,7 @@ func (j *EmailJob) Restore(source, userPath string, opts Options) (Result, error
 				result.Warnings = append(result.Warnings, "[dry-run] would restore PST files")
 			} else {
 				res, err := engine.Copy(engine.CopyOptions{
+					Ctx:         opts.Ctx,
 					Source:      outlookSrc,
 					Destination: outlookDst,
 					LogFile:     logFile,
@@ -219,6 +221,7 @@ func (j *EmailJob) Restore(source, userPath string, opts Options) (Result, error
 				result.Warnings = append(result.Warnings, "[dry-run] would restore Thunderbird profiles")
 			} else {
 				res, err := engine.Copy(engine.CopyOptions{
+					Ctx:         opts.Ctx,
 					Source:      tbSrc,
 					Destination: tbDst,
 					LogFile:     logFile,

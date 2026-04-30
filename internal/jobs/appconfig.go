@@ -96,6 +96,7 @@ func (j *AppConfigJob) Backup(userPath, target string, opts Options) (Result, er
 		}
 
 		res, err := engine.Copy(engine.CopyOptions{
+			Ctx:         opts.Ctx,
 			Source:      src,
 			Destination: dst,
 			LogFile:     logFile,
@@ -156,6 +157,7 @@ func (j *AppConfigJob) Restore(source, userPath string, opts Options) (Result, e
 		}
 
 		res, err := engine.Copy(engine.CopyOptions{
+			Ctx:         opts.Ctx,
 			Source:      srcDir,
 			Destination: dst,
 			LogFile:     logFile,

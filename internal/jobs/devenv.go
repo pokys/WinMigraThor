@@ -92,6 +92,7 @@ func (j *DevEnvJob) Backup(userPath, target string, opts Options) (Result, error
 		if info.IsDir() {
 			dst := filepath.Join(devDst, name)
 			res, err := engine.Copy(engine.CopyOptions{
+				Ctx:         opts.Ctx,
 				Source:      src,
 				Destination: dst,
 				LogFile:     logFile,
@@ -159,6 +160,7 @@ func (j *DevEnvJob) Restore(source, userPath string, opts Options) (Result, erro
 
 		if e.IsDir() {
 			res, err := engine.Copy(engine.CopyOptions{
+				Ctx:         opts.Ctx,
 				Source:      src,
 				Destination: dst,
 				LogFile:     logFile,
